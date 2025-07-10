@@ -1,0 +1,104 @@
+[build-system]
+requires = ["setuptools>=45", "wheel", "setuptools_scm[toml]>=6.2"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "permabc"
+version = "0.1.0"
+description = "Permutation-enhanced Approximate Bayesian Computation"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "Antoine Luciano", email = "antoine.luciano@example.com"}
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research", 
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9", 
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Scientific/Engineering :: Mathematics",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+requires-python = ">=3.8"
+dependencies = [
+    "jax>=0.4.0",
+    "jaxlib>=0.4.0",
+    "numpy>=1.20.0", 
+    "scipy>=1.7.0",
+    "matplotlib>=3.3.0",
+    "seaborn>=0.11.0",
+    "tqdm>=4.60.0"
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=6.0",
+    "pytest-cov>=2.10", 
+    "black>=21.0",
+    "flake8>=3.8",
+    "mypy>=0.800",
+]
+optional = [
+    "pymc>=5.0.0",
+    "psutil>=5.8.0",
+]
+notebooks = [
+    "jupyter>=1.0.0",
+    "ipykernel>=6.0.0",
+]
+
+[project.scripts]
+permabc-figures = "experiments.scripts.comparison.run_all_figures:main"
+
+[project.urls]
+Homepage = "https://github.com/yourusername/permABC"
+Repository = "https://github.com/yourusername/permABC.git"
+Documentation = "https://permabc.readthedocs.io"
+"Bug Tracker" = "https://github.com/yourusername/permABC/issues"
+
+[tool.setuptools]
+packages = ["permabc"]
+
+[tool.setuptools.package-data]
+permabc = ["*.txt", "*.md"]
+
+[tool.black]
+line-length = 88
+target-version = ['py38']
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+  # directories
+  \.eggs
+  | \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | build
+  | dist
+)/
+'''
+
+[tool.isort]
+profile = "black"
+multi_line_output = 3
+line_length = 88
+
+[tool.mypy]
+python_version = "3.8"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+
+[tool.pytest.ini_options]
+minversion = "6.0"
+addopts = "-ra -q --strict-markers"
+testpaths = [
+    "tests",
+]

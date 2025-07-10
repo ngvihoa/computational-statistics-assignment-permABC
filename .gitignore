@@ -2,7 +2,12 @@
 __pycache__/
 *.py[cod]
 *$py.class
+
+# Pickled files (serialized results)
 *.pkl
+
+# Compressed experiment results
+*.xz
 
 # C extensions
 *.so
@@ -28,8 +33,7 @@ share/python-wheels/
 MANIFEST
 
 # PyInstaller
-#  Usually these files are written by a python script from a template
-#  before PyInstaller builds the exe, so as to inject date/other infos into it.
+#  Usually these files are written by a template before PyInstaller builds the exe
 *.manifest
 *.spec
 
@@ -173,4 +177,58 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+# === Project specific ignores ===
+
+# Cluster job outputs
+cluster/
+figures/*/cluster/
+*.out
+*.ERR-*
+*.OUT-*
+
+# Temporary and old files
+*_old.py
+tree.txt
+
+# Generated figures (keep only source scripts)
+figures/*.png
+figures/*.pdf
+figures/*.svg
+figures/*/*.png
+figures/*/*.pdf  
+figures/*/*.svg
+
+# Keep important result files but ignore intermediate ones
 figures/*.pkl
+figures/*/*.pkl
+
+# BFG cleanup reports
+*.git.bfg-report/
+
+# Compiled C extensions for warm start
+test_warm_start/*/*.so
+test_warm_start/build/
+
+# Large data files (if not essential for reproduction)
+# Uncomment if datasets are too large:
+# datas/*.csv
+
+# Python build artifacts
+build/
+dist/
+*.egg-info/
+
+# Python caches
+__pycache__/
+*.pyc
+
+# Virtual environments
+venv/
+env/
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints
+
+# Test artifacts
+.pytest_cache/

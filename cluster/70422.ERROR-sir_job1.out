@@ -1,9 +1,0 @@
-/var/spool/slurmd/job70422/slurm_script: line 18: =: command not found
-Traceback (most recent call last):
-  File "/mnt/nfs/nrdata02-users-data/luciano/script/permABC/figures/sir/sir.py", line 10, in <module>
-    from smc import abc_smc, perm_abc_smc
-ModuleNotFoundError: No module named 'smc'
-Traceback (most recent call last):
-  File "/mnt/nfs/nrdata02-users-data/luciano/script/permABC/figures/sir/sir_figures.py", line 13, in <module>
-    from utils_functions import Theta
-ModuleNotFoundError: No module named 'utils_functions'

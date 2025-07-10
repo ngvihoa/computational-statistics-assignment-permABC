@@ -1,1 +1,102 @@
-# permABC
+# permABC: Permutation-based Approximate Bayesian Computation
+
+[![arXiv](https://img.shields.io/badge/arXiv-2507.06037-b31b1b.svg)](https://www.arxiv.org/abs/2507.06037)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+
+
+`permabc` is a Python package implementing a suite of Approximate Bayesian Computation (ABC) algorithms enhanced with permutation strategies to handle non-identifiability in multi-component models. It includes implementations of **permABC-SMC**, as well as novel **Over-Sampling** and **Under-Matching** variants designed to improve exploration and efficiency.
+
+This library is the official implementation for the paper: **[Permutations accelerate Approximate Bayesian Computation](https://www.arxiv.org/abs/2507.06037)**.
+
+## Key Features
+
+* **PermABC-SMC**: Core algorithm to resolve label switching using optimal transport (`perm_abc_smc`).
+* **Over-sampling (OS)**: An innovative strategy (`perm_abc_smc_os`) that simulates more components than observed to improve parameter recovery.
+* **Under-matching (UM)**: An efficient strategy (`perm_abc_smc_um`) that starts by matching a subset of components and progressively increases the complexity.
+* **Advanced MCMC Moves**: Includes standard and block-wise Gibbs moves for efficient particle updates.
+* **Modern Backend**: Built on `JAX` for high-performance, JIT-compiled computations.
+* **Extensible**: Easily adaptable to new statistical models.
+
+## Installation
+
+First, clone the repository:
+```bash
+git clone [https://github.com/votre_nom_utilisateur/permabc.git](https://github.com/votre_nom_utilisateur/permabc.git)
+cd permabc
+```
+
+Then, install the package and its dependencies. For development, it's recommended to use an editable install:
+```bash
+pip install -r requirements.txt
+pip install -e .
+```
+
+## Quick Start: A 3-Component Gaussian Model
+
+Here is a minimal example of how to use `perm_abc_smc` on a Gaussian mixture model.
+
+```python
+import jax
+import jax.numpy as jnp
+import numpy as np
+
+# 1. Import the model and algorithm
+from permabc.models import GaussianWithNoSummaryStats
+from permabc.algorithms import perm_abc_smc
+from permabc.core import KernelTruncatedRW
+
+# 2. Setup the model and generate observed data
+key = jax.random.PRNGKey(42)
+K = 3  # Number of components
+n_obs_per_comp = 50
+model = GaussianWithNoSummaryStats(K=K, n_obs=n_obs_per_comp)
+
+# Generate some true parameters and observed data
+key, key_true_params, key_obs_data = jax.random.split(key, 3)
+true_thetas = model.prior_generator(key_true_params, n_particles=1)
+y_obs = model.data_generator(key_obs_data, true_thetas)
+
+# 3. Configure and run the ABC-SMC algorithm
+n_particles = 500
+epsilon_target = 1.0
+
+results = perm_abc_smc(
+    key=key,
+    model=model,
+    n_particles=n_particles,
+    epsilon_target=epsilon_target,
+    y_obs=y_obs,
+    kernel=KernelTruncatedRW,
+    verbose=1
+)
+
+# 4. Analyze the results
+final_thetas = results['Thetas'][-1]
+final_weights = results['Weights'][-1]
+
+# Posterior mean for the global variance (sigma^2)
+posterior_mean_sigma2 = np.average(final_thetas.glob, weights=final_weights)
+print(f"True sigma^2: {true_thetas.glob[0, 0]:.4f}")
+print(f"Posterior mean for sigma^2: {posterior_mean_sigma2:.4f}")
+```
+
+## Reproducing Paper Results
+
+The experiments from the paper can be reproduced using the scripts located in the `experiments/` directory. Please refer to the README within that directory for detailed instructions.
+
+## Citing permABC
+
+If you use `permABC` in your research, please cite our paper:
+
+```bibtex
+@misc{luciano2025permutationsaccelerateapproximatebayesian,
+      title={Permutations accelerate Approximate Bayesian Computation}, 
+      author={Antoine Luciano and Charly Andral and Christian P. Robert and Robin J. Ryder},
+      year={2025},
+      eprint={2507.06037},
+      archivePrefix={arXiv},
+      primaryClass={stat.ME},
+      url={https://arxiv.org/abs/2507.06037}, 
+}
+```

@@ -1,4 +1,0 @@
-Traceback (most recent call last):
-  File "/mnt/nfs/nrdata02-users-data/luciano/script/permABC/figures/test_jax.py", line 6, in <module>
-    K, K_outlier = sys.argv[1], sys.argv[2]
-IndexError: list index out of range

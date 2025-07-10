@@ -1,6 +1,0 @@
-Traceback (most recent call last):
-  File "/mnt/nfs/nrdata02-users-data/luciano/script/permABC/figures/sir.py", line 15, in <module>
-    from models.SIR import SIRWithKnownInit, SIRWithUnknownInit
-  File "/mnt/nfs/nrdata02-users-data/luciano/script/permABC/models/SIR.py", line 9, in <module>
-    from permABC.utils_functions import Theta  # Import Theta from utils_functions
-ModuleNotFoundError: No module named 'permABC'

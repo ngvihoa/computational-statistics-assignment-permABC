@@ -1,3 +1,0 @@
-/var/spool/slurmd/job70423/slurm_script: line 18: =: command not found
-An NVIDIA GPU may be present on this machine, but a CUDA-enabled jaxlib is not installed. Falling back to cpu.
-slurmstepd-clust2: error: *** JOB 70423 ON clust2 CANCELLED AT 2025-04-18T03:45:15 ***

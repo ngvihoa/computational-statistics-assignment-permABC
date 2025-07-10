@@ -1,0 +1,450 @@
+"""
+SIR epidemic models for permutation-enhanced ABC.
+
+This module implements various SIR (Susceptible-Infected-Recovered) epidemic
+models with different parameter structures. These models are particularly
+challenging for ABC methods due to their complex dynamics and parameter
+identifiability issues.
+"""
+
+import jax.numpy as jnp
+from jax import random, jit, vmap, lax
+import jax
+import numpy as np
+from functools import partial
+
+# Import from package structure
+try:
+    from . import ModelBase
+    from ..utils.functions import Theta
+except ImportError:
+    # Fallback for old structure
+    try:
+        from models import model as ModelBase
+        from utils_functions import Theta
+    except ImportError:
+        from . import model as ModelBase
+        from ..utils.functions import Theta
+
+# Enable 64-bit precision for numerical stability
+jax.config.update("jax_enable_x64", True)
+
+
+@partial(jit, static_argnames=['n_obs', 'steps_per_day'])
+def simulate_sir_jax(S0, I0, R0, beta, gamma, n_pop, n_obs, dt=0.1, 
+                     noise_key=None, sigma=0.05, steps_per_day=10):
+    """
+    Efficient JAX implementation of SIR model simulation.
+    
+    This function simulates the SIR model using JAX for high performance.
+    It uses sub-daily time steps for numerical accuracy while returning
+    daily observations.
+    
+    Parameters
+    ----------
+    S0, I0, R0 : jnp.ndarray
+        Initial conditions for Susceptible, Infected, Recovered populations.
+        Shape: (n_particles, n_regions)
+    beta, gamma : jnp.ndarray
+        Transmission and recovery rates. Shape: (n_particles, n_regions)
+    n_pop : float
+        Total population size.
+    n_obs : int
+        Number of daily observations to return.
+    dt : float, default=0.1
+        Internal time step (fraction of day).
+    noise_key : jax.random.PRNGKey, optional
+        Random key for stochastic simulation.
+    sigma : float, default=0.05
+        Noise level for stochastic transmission.
+    steps_per_day : int, default=10
+        Number of sub-steps per day.
+        
+    Returns
+    -------
+    jnp.ndarray
+        Infected trajectory of shape (n_particles, n_regions, n_obs).
+    """
+    n_particles, n_regions = S0.shape
+    dtype = S0.dtype
+    
+    # Generate noise if stochastic simulation requested
+    if noise_key is not None and sigma > 0:
+        noise_shape = (n_particles, n_regions, n_obs, steps_per_day)
+        noise = jnp.exp(sigma * random.normal(noise_key, noise_shape, dtype=dtype))
+    else:
+        noise = jnp.ones((n_particles, n_regions, n_obs, steps_per_day), dtype=dtype)
+    
+    def simulate_particle(particle_idx):
+        """Simulate a single particle (all regions for one parameter set)."""
+        
+        def simulate_day(state, day_idx):
+            """Simulate one day with sub-steps."""
+            S, I, R = state
+            
+            def substep(carry, step_idx):
+                """Single sub-step of the simulation."""
+                S_curr, I_curr, R_curr = carry
+                
+                # Ensure non-negative populations
+                S_safe = jnp.maximum(S_curr, 0.0)
+                I_safe = jnp.maximum(I_curr, 0.0)
+                
+                # Transmission: S -> I (with optional noise)
+                inf_rate = beta[particle_idx] * S_safe * I_safe / n_pop * dt
+                noise_factor = noise[particle_idx, :, day_idx, step_idx]
+                new_infections = jnp.minimum(inf_rate * noise_factor, S_safe)
+                
+                # Recovery: I -> R
+                recovery_rate = gamma[particle_idx] * I_safe * dt
+                new_recoveries = jnp.minimum(recovery_rate, I_safe)
+                
+                # Update populations
+                I_new = jnp.maximum(0.0, I_safe + new_infections - new_recoveries)
+                R_new = jnp.maximum(0.0, R_curr + new_recoveries)
+                S_new = jnp.maximum(0.0, n_pop - I_new - R_new)
+                
+                return (S_new, I_new, R_new), I_new
+            
+            # Run all sub-steps for this day
+            final_state, _ = lax.scan(substep, (S, I, R), jnp.arange(steps_per_day))
+            return final_state, final_state[1]  # Return final state and I count
+        
+        # Initial conditions for this particle
+        initial_state = (S0[particle_idx], I0[particle_idx], R0[particle_idx])
+        
+        # Simulate all days
+        _, I_trajectory = lax.scan(simulate_day, initial_state, jnp.arange(n_obs))
+        
+        return I_trajectory
+    
+    # Simulate all particles in parallel
+    I_trajectories = vmap(simulate_particle)(jnp.arange(n_particles))
+    
+    # Reshape: (n_particles, n_obs, n_regions) -> (n_particles, n_regions, n_obs)
+    return jnp.transpose(I_trajectories, (0, 2, 1))
+
+
+class SIRWithKnownInit(ModelBase):
+    """
+    SIR model with known initial conditions.
+    
+    This model assumes:
+    - Initial conditions (S₀, I₀, R₀) are known and fixed
+    - β_k ~ Uniform(low_β, high_β) transmission rates per region
+    - R₀ ~ Uniform(low_R₀, high_R₀) global basic reproduction number
+    - γ_k = β_k / R₀ recovery rates (derived)
+    
+    The model is useful for studying regional variation in transmission
+    when the epidemic's initial state is well-known.
+    
+    Parameters
+    ----------
+    K : int
+        Number of regions/populations.
+    weights_distance : array-like, optional
+        Distance weights for regions.
+    n_obs : int, default=100
+        Number of daily observations.
+    n_pop : float, default=1000
+        Population size per region.
+    low_beta, high_beta : float
+        Range for transmission rate β.
+    low_r0, high_r0 : float
+        Range for basic reproduction number R₀.
+    I0, R0 : float
+        Fixed initial infected and recovered counts.
+    """
+    
+    def __init__(self, K, weights_distance=None, n_obs=100, n_pop=1000, 
+                 low_beta=1e-8, high_beta=5, low_r0=1e-8, high_r0=5, I0=100, R0=100):
+        """Initialize SIR model with known initial conditions."""
+        super().__init__(K, weights_distance)
+        
+        # Model parameters
+        self.n_obs = n_obs
+        self.n_pop = n_pop
+        self.I0 = I0
+        self.R0 = R0
+
+        # Parameter support ranges
+        self.support_par_loc = jnp.array([[low_beta, high_beta]])   # β_k ranges
+        self.support_par_glob = jnp.array([[low_r0, high_r0]])     # R₀ range
+        
+        # Parameter names for plotting
+        self.loc_name = ["$\\beta_{"]
+        self.glob_name = ["$R_0$"]
+        self.dim_loc = 1  # β is scalar per region
+        self.dim_glob = 1  # R₀ is single global parameter
+
+    def prior_generator(self, key, n_particles, n_silos=0):
+        """
+        Generate samples from the prior distribution.
+        
+        Parameters
+        ----------
+        key : jax.random.PRNGKey
+            Random number generator key.
+        n_particles : int
+            Number of particles to generate.
+        n_silos : int, default=0
+            Number of regions (if 0, defaults to K).
+            
+        Returns
+        -------
+        Theta
+            Parameter samples with:
+            - loc: Transmission rates β_k of shape (n_particles, n_silos, 1)
+            - glob: Basic reproduction number R₀ of shape (n_particles, 1)
+        """
+        if n_silos == 0:
+            n_silos = self.K
+            
+        key, key_beta, key_r0 = random.split(key, 3)
+
+        # Sample transmission rates: β_k ~ Uniform(low_β, high_β)
+        betas = random.uniform(
+            key_beta, 
+            shape=(n_particles, n_silos, 1), 
+            minval=self.support_par_loc[0, 0], 
+            maxval=self.support_par_loc[0, 1]
+        )
+        
+        # Sample basic reproduction number: R₀ ~ Uniform(low_R₀, high_R₀)
+        r0 = random.uniform(
+            key_r0, 
+            shape=(n_particles, 1), 
+            minval=self.support_par_glob[0, 0], 
+            maxval=self.support_par_glob[0, 1]
+        )
+
+        return Theta(loc=betas, glob=r0)
+
+    def data_generator(self, key, thetas):
+        """
+        Generate epidemic simulations.
+        
+        Parameters
+        ----------
+        key : jax.random.PRNGKey
+            Random number generator key.
+        thetas : Theta
+            Parameter values for simulation.
+            
+        Returns
+        -------
+        np.ndarray
+            Simulated infected counts of shape (n_particles, n_regions, n_obs).
+        """
+        # Extract parameters
+        betas = thetas.loc[:, :, 0]          # Transmission rates
+        gammas = betas / thetas.glob         # Recovery rates: γ = β / R₀
+        
+        # Set initial conditions (known)
+        S0 = jnp.full_like(betas, self.n_pop - self.I0 - self.R0)
+        I0_array = jnp.full_like(betas, self.I0)
+        R0_array = jnp.full_like(betas, self.R0)
+
+        # Simulate epidemic
+        result = simulate_sir_jax(
+            S0, I0_array, R0_array, betas, gammas, 
+            n_pop=self.n_pop, 
+            n_obs=self.n_obs,
+            noise_key=key
+        )
+        
+        return np.array(result)
+
+    def prior_logpdf(self, thetas):
+        """
+        Compute log probability density of the prior.
+        
+        For uniform priors, this is constant within support.
+        
+        Parameters
+        ----------
+        thetas : Theta
+            Parameter values to evaluate.
+            
+        Returns
+        -------
+        np.ndarray
+            Log probability densities (constant for uniform priors).
+        """
+        n_particles = thetas.loc.shape[0]
+        n_regions = thetas.loc.shape[1]
+        
+        # Log density for uniform distributions
+        log_beta_density = -jnp.log(self.support_par_loc[0, 1] - self.support_par_loc[0, 0])
+        log_r0_density = -jnp.log(self.support_par_glob[0, 1] - self.support_par_glob[0, 0])
+        
+        # Total log density: sum over all β_k plus R₀
+        total_log_density = n_regions * log_beta_density + log_r0_density
+        
+        return jnp.full(n_particles, total_log_density)
+
+
+class SIRWithUnknownInit(ModelBase):
+    """
+    SIR model with unknown initial conditions.
+    
+    This more complex model treats initial conditions as unknown parameters:
+    - I₀_k ~ Uniform(low_I, high_I) initial infected per region
+    - R₀_k ~ Uniform(low_R, high_R) initial recovered per region  
+    - β_k ~ Uniform(low_β, high_β) transmission rates per region
+    - R₀ ~ Uniform(low_R₀, high_R₀) global basic reproduction number
+    - γ_k = β_k / R₀ recovery rates (derived)
+    
+    This model is more realistic but also more challenging for inference
+    due to the increased parameter dimensionality and identifiability issues.
+    
+    Parameters
+    ----------
+    K : int
+        Number of regions/populations.
+    weights_distance : array-like, optional
+        Distance weights for regions.
+    n_obs : int, default=100
+        Number of daily observations.
+    n_pop : float, default=1000
+        Population size per region.
+    low_I, high_I : float
+        Range for initial infected counts.
+    low_R, high_R : float
+        Range for initial recovered counts.
+    low_beta, high_beta : float
+        Range for transmission rates.
+    low_r0, high_r0 : float
+        Range for basic reproduction number.
+    """
+    
+    def __init__(self, K, weights_distance=None, n_obs=100, n_pop=1000, 
+                 low_I=1e-8, high_I=1000, low_R=1e-8, high_R=1000, 
+                 low_beta=1e-8, high_beta=5, low_r0=1e-8, high_r0=5):
+        """Initialize SIR model with unknown initial conditions."""
+        super().__init__(K, weights_distance)
+        
+        # Model parameters
+        self.n_obs = n_obs
+        self.n_pop = n_pop
+
+        # Parameter support ranges
+        self.support_par_loc = jnp.array([
+            [low_I, high_I],        # I₀_k ranges
+            [low_R, high_R],        # R₀_k ranges  
+            [low_beta, high_beta]   # β_k ranges
+        ])
+        self.support_par_glob = jnp.array([[low_r0, high_r0]])  # R₀ range
+        
+        # Parameter names and dimensions
+        self.loc_name = ["$I^0_{", "$R^0_{", "$\\beta_{"]
+        self.glob_name = ["$R_0$"]
+        self.dim_loc = 3  # Three local parameters per region
+        self.dim_glob = 1  # One global parameter
+
+    def prior_generator(self, key, n_particles, n_silos=0):
+        """
+        Generate samples from the prior distribution.
+        
+        Parameters
+        ----------
+        key : jax.random.PRNGKey
+            Random number generator key.
+        n_particles : int
+            Number of particles to generate.
+        n_silos : int, default=0
+            Number of regions (if 0, defaults to K).
+            
+        Returns
+        -------
+        Theta
+            Parameter samples with:
+            - loc: [I₀_k, R₀_k, β_k] of shape (n_particles, n_silos, 3)
+            - glob: R₀ of shape (n_particles, 1)
+        """
+        if n_silos == 0: 
+            n_silos = self.K
+            
+        key, key_loc, key_glob = random.split(key, 3)
+        
+        # Sample local parameters uniformly within support
+        loc = random.uniform(
+            key_loc, 
+            shape=(n_particles, n_silos, self.support_par_loc.shape[0]), 
+            minval=self.support_par_loc[:, 0], 
+            maxval=self.support_par_loc[:, 1]
+        )
+        
+        # Sample global parameter uniformly within support
+        glob = random.uniform(
+            key_glob, 
+            shape=(n_particles, self.support_par_glob.shape[0]), 
+            minval=self.support_par_glob[:, 0], 
+            maxval=self.support_par_glob[:, 1]
+        )
+        
+        return Theta(loc=loc, glob=glob)
+
+    def data_generator(self, key, thetas):
+        """
+        Generate epidemic simulations with unknown initial conditions.
+        
+        Parameters
+        ----------
+        key : jax.random.PRNGKey
+            Random number generator key.
+        thetas : Theta
+            Parameter values for simulation.
+            
+        Returns
+        -------
+        np.ndarray
+            Simulated infected counts of shape (n_particles, n_regions, n_obs).
+        """
+        # Extract parameters
+        I0 = thetas.loc[:, :, 0]        # Initial infected
+        R0_init = thetas.loc[:, :, 1]   # Initial recovered  
+        betas = thetas.loc[:, :, 2]     # Transmission rates
+        gammas = betas / thetas.glob    # Recovery rates: γ = β / R₀
+        
+        # Compute initial susceptible (ensuring non-negative)
+        S0 = jnp.maximum(0.0, self.n_pop - I0 - R0_init)
+        
+        # Simulate epidemic
+        result = simulate_sir_jax(
+            S0, I0, R0_init, betas, gammas, 
+            n_pop=self.n_pop, 
+            n_obs=self.n_obs,
+            noise_key=key
+        )
+        
+        return np.array(result)
+    
+    def prior_logpdf(self, thetas):
+        """
+        Compute log probability density of the prior.
+        
+        For uniform priors, this is constant within support.
+        
+        Parameters
+        ----------
+        thetas : Theta
+            Parameter values to evaluate.
+            
+        Returns
+        -------
+        np.ndarray
+            Log probability densities.
+        """
+        # For uniform priors, return constant log density
+        # In practice, you might want to check parameter bounds here
+        n_particles = thetas.loc.shape[0]
+        return jnp.zeros(n_particles)
+
+
+# Export key classes
+__all__ = [
+    'SIRWithKnownInit',
+    'SIRWithUnknownInit', 
+    'simulate_sir_jax'
+]
