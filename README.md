@@ -3,8 +3,9 @@
 [![arXiv](https://img.shields.io/badge/arXiv-2507.06037-b31b1b.svg)](https://www.arxiv.org/abs/2507.06037)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-<img width="512" height="512" alt="permABC_logo" src="https://github.com/user-attachments/assets/cca21c43-e06f-4d93-a06e-740d551f73a6" />
-
+<p align="center">
+  <img width="300" height="300" alt="permABC_logo" src="https://github.com/user-attachments/assets/cca21c43-e06f-4d93-a06e-740d551f73a6" />
+</p>
 
 `permabc` is a Python package implementing a suite of Approximate Bayesian Computation (ABC) algorithms enhanced with permutation strategies to handle non-identifiability in multi-component models. It includes implementations of **permABC-SMC**, as well as novel **Over-Sampling** and **Under-Matching** variants designed to improve exploration and efficiency.
 
