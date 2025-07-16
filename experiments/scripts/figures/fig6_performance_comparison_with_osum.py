@@ -15,7 +15,7 @@ import os
 import sys
 import argparse
 import subprocess
-
+from pathlib import Path
 
 def parse_arguments():
     """Parse command line arguments."""
@@ -49,57 +49,61 @@ def main():
     
     print("Figure 6: Performance comparison with OSUM methods")
     print(f"Parameters: K={args.K}, K_outliers={args.K_outliers}, seed={args.seed}")
-    print(f"N_points={args.N_points:,}, N_particles={args.N_particles:,}")
-    print(f"Plot type: {args.plot}")
     
-    # Path to the main performance comparison script
-    script_path = os.path.join(os.path.dirname(__file__), 'run_performance_comparison.py')
+    # --- Corrected Path Construction ---
+    # Go up 3 levels to get from /experiments/scripts/figures to the project root
+    project_root = Path(__file__).resolve().parents[3]
+    main_script_path = project_root / 'experiments' / 'scripts' / 'run_performance_comparison.py'
+    results_dir = project_root / 'experiments' / 'results' / 'performance_comparison'
     
-    # Build command arguments
-    cmd_args = [
-        sys.executable, script_path,
-        '--K', str(args.K),
-        '--K_outliers', str(args.K_outliers),
-        '--seed', str(args.seed),
-        '--N_points', str(args.N_points),
-        '--N_particles', str(args.N_particles),
-        '--plot', args.plot,
-        '--output-dir', args.output_dir,
-        '--osum'  # Enable over-sampling and under-matching
-    ]
-    
-    # Add rerun argument if provided
+    # --- Check for existing results to reuse ---
+    rerun_path = None
     if args.rerun:
-        cmd_args.extend(['--rerun', args.rerun])
-    
-    print(f"Executing: {' '.join(cmd_args)}")
-    
-    # Execute the main script
-    result = subprocess.run(cmd_args)
-    
-    if result.returncode == 0:
-        print("\nFigure 6 generation complete!")
-        print("This figure shows the performance comparison between:")
-        print("  - ABC-Vanilla vs permABC-Vanilla")
-        print("  - ABC-SMC vs permABC-SMC")
-        print("  - ABC-PMC")
-        print("  - permABC-SMC-OS (Over-Sampling)")
-        print("  - permABC-SMC-UM (Under-Matching)")
-        
-        if args.plot == 'nsim':
-            print("Plot generated: Simulation efficiency only")
-        elif args.plot == 'time':
-            print("Plot generated: Time efficiency only")
-        else:
-            print("Plots generated: Both simulation and time efficiency (separate files)")
-            
-        print(f"  - {args.K_outliers} outlier components added to test robustness")
+        rerun_path = args.rerun
+        print(f"User specified --rerun. Using file: {rerun_path}")
     else:
-        print(f"Error: Script failed with return code {result.returncode}")
-    
-    # Return the same exit code as the subprocess
-    sys.exit(result.returncode)
+        results_filename = f"performance_K_{args.K}_outliers_{args.K_outliers}_osum_True_seed_{args.seed}.pkl"
+        results_filepath = results_dir / results_filename
+        if results_filepath.exists():
+            rerun_path = str(results_filepath)
+            print(f"✅ Found existing results file. Re-running in plot-only mode from: {rerun_path}")
 
+    # --- Build the command to execute ---
+    if rerun_path:
+        # Build the rerun command
+        cmd_args = [
+            sys.executable, str(main_script_path),
+            '--rerun', rerun_path,
+            '--output-dir', str(project_root), # Pass project root as output dir
+            '--plot', args.plot,
+            '--osum' # Important: Tell the script to process as fig6
+        ]
+    else:
+        # Build the command for a full run
+        print("No results file found. Running full experiment...")
+        cmd_args = [
+            sys.executable, str(main_script_path),
+            '--K', str(args.K),
+            '--K_outliers', str(args.K_outliers),
+            '--seed', str(args.seed),
+            '--N_points', str(args.N_points),
+            '--N_particles', str(args.N_particles),
+            '--plot', args.plot,
+            '--output-dir', str(project_root), # Pass project root as output dir
+            '--osum' # Ensure OSUM methods are included
+        ]
+
+    # --- Execute the command ---
+    print(f"\nExecuting: {' '.join(cmd_args)}\n")
+    try:
+        subprocess.run(cmd_args, check=True)
+        print("\nFigure 6 generation complete!")
+    except subprocess.CalledProcessError as e:
+        print(f"\nError: Script failed with return code {e.returncode}")
+        sys.exit(e.returncode)
+    except KeyboardInterrupt:
+        print("\nExperiment interrupted by user.")
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()

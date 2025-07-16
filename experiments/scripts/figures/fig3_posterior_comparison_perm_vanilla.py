@@ -125,7 +125,7 @@ def create_comparison_plot(thetas, thetas_perm, dists, dists_perm, y_obs, epsilo
     y = y_obs[0, :, 0]
     
     # Create plot
-    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+    fig, axes = plt.subplots(1, 2, figsize=(10, 5))
     
     for i, epsilon in enumerate(epsilons):
         # Sample particles within epsilon tolerance
@@ -237,8 +237,8 @@ def save_results(thetas, thetas_perm, dists, dists_perm, y_obs, epsilon_star,
     base_name = f"fig3_seed_{seed}"
     fig.savefig(os.path.join(figures_dir, f"{base_name}.pdf"), 
                 dpi=300, bbox_inches='tight')
-    fig.savefig(os.path.join(figures_dir, f"{base_name}.png"), 
-                dpi=300, bbox_inches='tight')
+    # fig.savefig(os.path.join(figures_dir, f"{base_name}.png"), 
+    #             dpi=300, bbox_inches='tight')
     plt.close(fig)
     
     print(f"Figures saved to: {figures_dir}/{base_name}.*")
@@ -282,8 +282,8 @@ def rerun_from_pickle(pkl_path):
     base_name = f"fig3_seed_{seed}"
     fig.savefig(os.path.join(figures_dir, f"{base_name}.pdf"), 
                 dpi=300, bbox_inches='tight')
-    fig.savefig(os.path.join(figures_dir, f"{base_name}.png"), 
-                dpi=300, bbox_inches='tight')
+    # fig.savefig(os.path.join(figures_dir, f"{base_name}.png"), 
+    #             dpi=300, bbox_inches='tight')
     plt.close(fig)
     
     plt.show()

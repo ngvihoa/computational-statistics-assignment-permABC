@@ -20,7 +20,7 @@ import pickle
 import argparse
 import time
 from jax import random
-
+from pathlib import Path
 
 
 from permabc.algorithms.smc import abc_smc, perm_abc_smc
@@ -32,7 +32,9 @@ from permabc.core.distances import optimal_index_distance
 from permabc.models.Gaussian_with_no_summary_stats import GaussianWithNoSummaryStats
 from permabc.utils.functions import Theta
 
-def select_indices(L, m, facteur=2.0):
+
+FACTOR = 1.  # Exponential spacing factor for indices selection
+def select_indices(L, m, factor=FACTOR):
     """Extract m elements with exponential spacing."""
     n = len(L)
     if m >= n:
@@ -43,13 +45,13 @@ def select_indices(L, m, facteur=2.0):
     indices = []
     for i in range(m):
         t = i / (m - 1) if m > 1 else 0
-        if facteur != 1:
-            mapped_t = (facteur ** t - 1) / (facteur - 1)
+        if factor != 1:
+            mapped_t = (factor ** t - 1) / (factor - 1)
         else:
             mapped_t = t
         indice = int(mapped_t * (n - 1))
         indices.append(indice)
-    
+
     return sorted(list(set(indices)))
 
 
@@ -296,20 +298,19 @@ def process_results(vanilla_results, smc_results, osum_results, K, N_particles, 
             unique = np.array(out["unique_part"])[1:]
             time_vals = np.cumsum(out["Time"][1:])
             
-            # Apply exponential spacing
-            indices = select_indices(list(range(len(n_sim))), 10, facteur=2.0)
-            
-            # Normalize by unique particles
-            n_sim_unique = n_sim[indices] / (K * unique[indices] * N_particles) * N_sample
-            time_unique = time_vals[indices] / (K * unique[indices] * N_particles) * N_sample
-            
-            for i in indices:
+            # --- FIX: Loop over all points, no down-sampling here ---
+            for i in range(len(n_sim)):
+                # Normalization is now applied to every point
+                n_sim_unique = n_sim[i] / (K * unique[i] * N_particles) * N_sample
+                time_unique = time_vals[i] / (K * unique[i] * N_particles) * N_sample
+                
                 smc_data.append({
                     'method': display_name,
-                    'n_sim': n_sim_unique[list(indices).index(i)],
-                    'time': time_unique[list(indices).index(i)],
+                    'n_sim': n_sim_unique,
+                    'time': time_unique,
                     'epsilon': epsilons[i]
                 })
+
     
     # Process OSUM results
     osum_data = []
@@ -365,165 +366,222 @@ def process_results(vanilla_results, smc_results, osum_results, K, N_particles, 
 
 def get_plot_style():
     """Get consistent plot styling for all performance plots."""
-    # Color mapping
+    
+    # Couleurs ajustées pour correspondre au graphique
     colors = {
-        'ABC-Vanilla': '#ff7f0e',
-        'permABC-Vanilla': '#1f77b4', 
-        'ABC-SMC': '#ff7f0e',
-        'ABC-PMC': '#ff7f0e',
-        'permABC-SMC': '#1f77b4',
-        'permABC-SMC-OS': '#2ca02c',
-        'permABC-SMC-UM': '#2ca02c'
+        'ABC-Vanilla': '#d62728',      # Rouge
+        'permABC-Vanilla': '#2ca02c',  # Vert
+        'ABC-SMC': '#ff7f0e',          # Orange foncé
+        'ABC-PMC': '#ffbb78',          # Orange clair
+        'permABC-SMC': '#1f77b4',      # Bleu
+        'permABC-SMC-OS': '#e377c2',   # Rose
+        'permABC-SMC-UM': '#9467bd'    # Violet
     }
     
-    # Marker mapping
+    # Marqueurs correspondant au graphique
     markers = {
-        'ABC-Vanilla': 's',
-        'permABC-Vanilla': 's',
-        'ABC-SMC': 'o', 
-        'ABC-PMC': 'o',
-        'permABC-SMC': 'o',
-        'permABC-SMC-OS': '^',
-        'permABC-SMC-UM': '^'
+        'ABC-Vanilla': 's',       # Carré
+        'permABC-Vanilla': 's',   # Carré
+        'ABC-SMC': 'o',           # Cercle
+        'ABC-PMC': 'o',           # Cercle
+        'permABC-SMC': 'o',       # Cercle
+        'permABC-SMC-OS': '^',    # Triangle
+        'permABC-SMC-UM': '^'     # Triangle
     }
     
-    # Line style mapping
+    # Styles de ligne correspondant au graphique
     linestyles = {
-        'ABC-Vanilla': '-',
-        'permABC-Vanilla': '-',
-        'ABC-SMC': '--',
-        'ABC-PMC': '--', 
-        'permABC-SMC': '--',
-        'permABC-SMC-OS': '--',
-        'permABC-SMC-UM': ':'
+        'ABC-Vanilla': '-',       # Solide
+        'permABC-Vanilla': '-',   # Solide
+        'ABC-SMC': '--',          # Tirets
+        'ABC-PMC': '--',          # Tirets
+        'permABC-SMC': '--',      # Tirets
+        'permABC-SMC-OS': '--',   # Tirets
+        'permABC-SMC-UM': '--'    # Tirets (modifié de ':' à '--')
     }
     
     return colors, markers, linestyles
 
 
-def create_nsim_plot(df, K, K_outliers, include_osum):
+
+
+def create_nsim_plot(df, K, K_outliers, include_osum, ax = None):
     """Create simulation efficiency plot."""
     colors, markers, linestyles = get_plot_style()
     
-    fig, ax = plt.subplots(figsize=(10, 8))
+    # Define the sampling factors for each SMC/PMC method
+    smc_factors = {
+        "permABC-SMC": 0.0001,
+        "ABC-SMC": 0.0001,
+        "ABC-PMC": 0.00001
+    }
+    
+    len_indices = {
+        "permABC-SMC": 10,
+        "ABC-SMC": 10,
+        "ABC-PMC": 10,
+    }
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(12, 7))
+    else:
+        fig = ax.get_figure()
     
     # Plot simulation efficiency
     for method in df['method'].unique():
         method_data = df[df['method'] == method].sort_values('epsilon')
-        ax.plot(method_data['n_sim'], method_data['epsilon'], 
-                label=method, color=colors.get(method, 'gray'),
-                marker=markers.get(method, 'o'), linestyle=linestyles.get(method, '-'),
-                markersize=8, linewidth=2)
+        
+        # Apply subsampling only to SMC and PMC methods for clarity
+        if 'SMC' in method or 'PMC' in method:
+            method_data = method_data[method_data['n_sim'] <= 1e6] # Increased limit
+            
+            # Get the specific factor for the method, or use a default
+            factor = smc_factors.get(method, 2.0)
+            length_indices = len_indices.get(method, 10)
+            indices = select_indices(list(range(len(method_data))), length_indices, factor=factor)
+
+            # Use .iloc to apply the indices
+            ax.plot(method_data['n_sim'].iloc[indices], method_data['epsilon'].iloc[indices], 
+                    label=method, color=colors.get(method, 'gray'),
+                    marker=markers.get(method, 'o'), linestyle=linestyles.get(method, '-'),
+                    markersize=8, linewidth=2)
+        else:
+            # Plot all points for other methods (e.g., Vanilla)
+            ax.plot(method_data['n_sim'], method_data['epsilon'], 
+                    label=method, color=colors.get(method, 'gray'),
+                    marker=markers.get(method, 'o'), linestyle=linestyles.get(method, '-'),
+                    markersize=8, linewidth=2)
     
     ax.set_yscale("log")
     ax.set_xscale("log")
     ax.set_xlabel("Number of simulations per 1000 unique particles", fontsize=12)
-    ax.set_ylabel("ε", fontsize=12)
-    ax.legend(fontsize=10)
-    ax.grid(True, alpha=0.3)
-    ax.set_title(f"Simulation Efficiency (K={K}, Outliers={K_outliers})", fontsize=14)
+    ax.set_ylabel("$\\varepsilon$", fontsize=12)
+    ax.legend(fontsize=12)
+    #ax.grid(False, which="both", ls="--", alpha=0.3)
+    # ax.set_title(f"Simulation Efficiency (K={K}, Outliers={K_outliers})", fontsize=14)
     
     plt.tight_layout()
     return fig
 
-
-def create_time_plot(df, K, K_outliers, include_osum):
+def create_time_plot(df, K, K_outliers, include_osum, ax = None):
     """Create time efficiency plot."""
     colors, markers, linestyles = get_plot_style()
+
+    # Define the sampling factors for each SMC/PMC method
+    smc_factors = {
+        "permABC-SMC": 0.0001,
+        "ABC-SMC": 0.000001,
+        "ABC-PMC": 0.00001
+    }
     
-    fig, ax = plt.subplots(figsize=(10, 8))
+    len_indices = {
+        "permABC-SMC": 10,
+        "ABC-SMC": 10,
+        "ABC-PMC": 10,
+    }
+    
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(12, 7))
+    else:
+        fig = ax.get_figure()
     
     # Plot time efficiency
     for method in df['method'].unique():
         method_data = df[df['method'] == method].sort_values('epsilon')
-        ax.plot(method_data['time'], method_data['epsilon'], 
-                label=method, color=colors.get(method, 'gray'),
-                marker=markers.get(method, 'o'), linestyle=linestyles.get(method, '-'),
-                markersize=8, linewidth=2)
+        
+        # Apply subsampling only to SMC and PMC methods for clarity
+        if 'SMC' in method or 'PMC' in method:
+            method_data = method_data[method_data['n_sim'] <= 1e6] # Increased limit
+            # Get the specific factor for the method, or use a default
+            factor = smc_factors.get(method, 2.0)
+            length_indices = len_indices.get(method, 10)
+            indices = select_indices(list(range(len(method_data))), length_indices, factor=factor)
+
+            # Use .iloc to apply the indices
+            ax.plot(method_data['time'].iloc[indices], method_data['epsilon'].iloc[indices], 
+                    label=method, color=colors.get(method, 'gray'),
+                    marker=markers.get(method, 'o'), linestyle=linestyles.get(method, '-'),
+                    markersize=8, linewidth=2)
+        else:
+            # Plot all points for other methods (e.g., Vanilla)
+            ax.plot(method_data['time'], method_data['epsilon'], 
+                    label=method, color=colors.get(method, 'gray'),
+                    marker=markers.get(method, 'o'), linestyle=linestyles.get(method, '-'),
+                    markersize=8, linewidth=2)
     
     ax.set_yscale("log")
     ax.set_xscale("log")
     ax.set_xlabel("Time per 1000 unique particles (seconds)", fontsize=12)
-    ax.set_ylabel("ε", fontsize=12)
-    ax.legend(fontsize=10)
-    ax.grid(True, alpha=0.3)
-    ax.set_title(f"Time Efficiency (K={K}, Outliers={K_outliers})", fontsize=14)
+    ax.set_ylabel("$\\varepsilon$", fontsize=12)
+    ax.legend(fontsize=12)
+    #ax.grid(False, which="both", ls="--", alpha=0.3)
+    # ax.set_title(f"Time Efficiency (K={K}, Outliers={K_outliers})", fontsize=14)
     
     plt.tight_layout()
     return fig
 
 
 def create_combined_plot(df, K, K_outliers, include_osum):
-    """Create combined simulation and time efficiency plots."""
-    colors, markers, linestyles = get_plot_style()
+    """Create combined simulation and time efficiency plots by calling individual plot functions."""
     
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
+    # 1. Create a figure with two subplots
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(20, 5))
     
-    # Plot 1: Number of simulations
-    for method in df['method'].unique():
-        method_data = df[df['method'] == method].sort_values('epsilon')
-        ax1.plot(method_data['n_sim'], method_data['epsilon'], 
-                label=method, color=colors.get(method, 'gray'),
-                marker=markers.get(method, 'o'), linestyle=linestyles.get(method, '-'),
-                markersize=6, linewidth=2)
+    # 2. Call the simulation plot function on the first subplot
+    create_nsim_plot(df, K, K_outliers, include_osum, ax=ax1)
     
-    ax1.set_yscale("log")
-    ax1.set_xscale("log")
-    ax1.set_xlabel("Number of simulations per 1000 unique particles", fontsize=12)
-    ax1.set_ylabel("ε", fontsize=12)
-    ax1.legend(fontsize=9)
-    ax1.grid(True, alpha=0.3)
-    ax1.set_title(f"(a) Simulation Efficiency (K={K}, Outliers={K_outliers})", fontsize=12)
+    # 3. Call the time plot function on the second subplot
+    create_time_plot(df, K, K_outliers, include_osum, ax=ax2)
     
-    # Plot 2: Time
-    for method in df['method'].unique():
-        method_data = df[df['method'] == method].sort_values('epsilon')
-        ax2.plot(method_data['time'], method_data['epsilon'], 
-                label=method, color=colors.get(method, 'gray'),
-                marker=markers.get(method, 'o'), linestyle=linestyles.get(method, '-'),
-                markersize=6, linewidth=2)
-    
-    ax2.set_yscale("log")
-    ax2.set_xscale("log")
-    ax2.set_xlabel("Time per 1000 unique particles (seconds)", fontsize=12)
-    ax2.set_ylabel("ε", fontsize=12)
-    ax2.legend(fontsize=9)
-    ax2.grid(True, alpha=0.3)
-    ax2.set_title(f"(b) Time Efficiency (K={K}, Outliers={K_outliers})", fontsize=12)
-    
+    # 4. Final layout adjustment
     plt.tight_layout()
+    
     return fig
 
 
-def save_results(df, vanilla_results, smc_results, osum_results, model, y_obs, true_theta, 
+
+import os
+import sys
+import numpy as np
+import matplotlib.pyplot as plt
+import pandas as pd
+import pickle
+import argparse
+import time
+from jax import random
+
+
+def save_results(df, vanilla_results, smc_results, osum_results, model, y_obs, true_theta,
                 K, K_outliers, include_osum, seed, N_particles, output_dir, plot_type='both'):
     """Save results to both pickle and CSV formats."""
     # Create output directories
-    results_dir = os.path.join(output_dir, "results", "performance_comparison")
-    figures_dir = os.path.join(output_dir, "figures", "fig4" if not include_osum else "fig6")
+    results_dir = os.path.join(output_dir, "experiments", "results", "performance_comparison")
     
+    # Correctly determine figure directory based on the 'include_osum' flag for this specific run
+    fig_num_str = "fig4" if not include_osum else "fig6"
+    figures_dir = os.path.join(output_dir, "figures", fig_num_str)
+
     os.makedirs(results_dir, exist_ok=True)
     os.makedirs(figures_dir, exist_ok=True)
-    
+
     # Add metadata to dataframe
     df['K'] = K
     df['K_outliers'] = K_outliers
     df['include_osum'] = include_osum
     df['seed'] = seed
-    
+
     # Prepare comprehensive data for pickle
     full_data = {
         'seed': seed,
         'K': K,
         'K_outliers': K_outliers,
-        'include_osum': include_osum,
+        'include_osum': include_osum, # This reflects the data generation, not necessarily the plotting intent
         'N_particles': N_particles,
         'plot_type': plot_type,
         'summary_df': df,
         'results': {
             'vanilla': vanilla_results,
             'smc': smc_results,
-            'osum': osum_results if include_osum else None
+            'osum': osum_results
         },
         'experiment_setup': {
             'model': model,
@@ -537,75 +595,37 @@ def save_results(df, vanilla_results, smc_results, osum_results, model, y_obs, t
             'timestamp': pd.Timestamp.now().isoformat()
         }
     }
-    
-    # Save comprehensive pickle file
+
+    # Save comprehensive pickle file only if we are not in rerun mode from another file
+    # This prevents overwriting the fig6 data when just creating a fig4 plot from it.
     base_filename = f"performance_K_{K}_outliers_{K_outliers}_osum_{include_osum}_seed_{seed}"
     pkl_path = os.path.join(results_dir, f"{base_filename}.pkl")
-    with open(pkl_path, "wb") as f:
-        pickle.dump(full_data, f)
-    print(f"Full results saved to pickle: {pkl_path}")
-    
+    if not os.path.exists(pkl_path): # Only save if it's a fresh run
+        with open(pkl_path, "wb") as f:
+            pickle.dump(full_data, f)
+        print(f"Full results saved to pickle: {pkl_path}")
+
     # Save summary to CSV for backward compatibility
     csv_path = os.path.join(results_dir, f"{base_filename}.csv")
     df.to_csv(csv_path, index=False)
     print(f"Summary saved to CSV: {csv_path}")
-    
+
     # Create and save plots based on plot_type
     fig_num = "fig4" if not include_osum else "fig6"
+
+    # Create plots
+    fig_nsim = create_nsim_plot(df, K, K_outliers, include_osum)
+    base_name_nsim = f"{fig_num}_nsim_seed_{seed}"
+    fig_nsim.savefig(os.path.join(figures_dir, f"{base_name_nsim}.pdf"), dpi=300, bbox_inches='tight')
+    plt.close(fig_nsim)
     
-    if plot_type == 'nsim':
-        # Only simulation efficiency plot
-        fig = create_nsim_plot(df, K, K_outliers, include_osum)
-        base_name = f"{fig_num}_nsim_seed_{seed}"
-        fig.savefig(os.path.join(figures_dir, f"{base_name}.pdf"), 
-                    dpi=300, bbox_inches='tight')
-        fig.savefig(os.path.join(figures_dir, f"{base_name}.png"), 
-                    dpi=300, bbox_inches='tight')
-        plt.close(fig)
-        print(f"Simulation efficiency plot saved: {figures_dir}/{base_name}.*")
-        
-    elif plot_type == 'time':
-        # Only time efficiency plot
-        fig = create_time_plot(df, K, K_outliers, include_osum)
-        base_name = f"{fig_num}_time_seed_{seed}"
-        fig.savefig(os.path.join(figures_dir, f"{base_name}.pdf"), 
-                    dpi=300, bbox_inches='tight')
-        fig.savefig(os.path.join(figures_dir, f"{base_name}.png"), 
-                    dpi=300, bbox_inches='tight')
-        plt.close(fig)
-        print(f"Time efficiency plot saved: {figures_dir}/{base_name}.*")
-        
-    elif plot_type == 'both':
-        # Both plots - separate files
-        # 1. Simulation efficiency
-        fig_nsim = create_nsim_plot(df, K, K_outliers, include_osum)
-        base_name_nsim = f"{fig_num}_nsim_seed_{seed}"
-        fig_nsim.savefig(os.path.join(figures_dir, f"{base_name_nsim}.pdf"), 
-                        dpi=300, bbox_inches='tight')
-        fig_nsim.savefig(os.path.join(figures_dir, f"{base_name_nsim}.png"), 
-                        dpi=300, bbox_inches='tight')
-        plt.close(fig_nsim)
-        
-        # 2. Time efficiency
-        fig_time = create_time_plot(df, K, K_outliers, include_osum)
-        base_name_time = f"{fig_num}_time_seed_{seed}"
-        fig_time.savefig(os.path.join(figures_dir, f"{base_name_time}.pdf"), 
-                        dpi=300, bbox_inches='tight')
-        fig_time.savefig(os.path.join(figures_dir, f"{base_name_time}.png"), 
-                        dpi=300, bbox_inches='tight')
-        plt.close(fig_time)
-        
-        # 3. Combined plot (legacy)
-        fig_combined = create_combined_plot(df, K, K_outliers, include_osum)
-        base_name_combined = f"{fig_num}_combined_seed_{seed}"
-        fig_combined.savefig(os.path.join(figures_dir, f"{base_name_combined}.pdf"), 
-                            dpi=300, bbox_inches='tight')
-        fig_combined.savefig(os.path.join(figures_dir, f"{base_name_combined}.png"), 
-                            dpi=300, bbox_inches='tight')
-        plt.close(fig_combined)
-        
-        print(f"All plots saved: {figures_dir}/{fig_num}_*_seed_{seed}.*")
-    
+    fig_time = create_time_plot(df, K, K_outliers, include_osum)
+    base_name_time = f"{fig_num}_time_seed_{seed}"
+    fig_time.savefig(os.path.join(figures_dir, f"{base_name_time}.pdf"), dpi=300, bbox_inches='tight')
+    plt.close(fig_time)
+
+    print(f"Plots saved in: {figures_dir}")
+
     return pkl_path, csv_path
 
 
@@ -636,85 +656,50 @@ def analyze_performance_metrics(df):
                   f"sims={median_row['n_sim']:.0f}, time={median_row['time']:.2f}s")
 
 
-def rerun_from_file(file_path, plot_type='both'):
-    """Recreate plots from existing pickle or CSV results."""
+def rerun_from_file(file_path, plot_type='both', osum_flag_for_plot=False, output_dir_override=None):
+    """Recreate plots from existing pickle file, respecting current run flags."""
     print(f"Loading results from: {file_path}")
-    
-    # Determine file type and load accordingly
-    if file_path.endswith('.pkl'):
-        with open(file_path, "rb") as f:
-            data = pickle.load(f)
-        df = data['summary_df']
-        K = data['K']
-        K_outliers = data['K_outliers']
-        include_osum = data['include_osum']
-        seed = data['seed']
-        
-        print(f"Loaded pickle with full results")
-        # Analyze full results if available
-        if 'results' in data:
-            print(f"Available result types: {list(data['results'].keys())}")
-            
-    elif file_path.endswith('.csv'):
-        df = pd.read_csv(file_path)
-        K = df['K'].iloc[0] if 'K' in df.columns else 20
-        K_outliers = df['K_outliers'].iloc[0] if 'K_outliers' in df.columns else 4
-        include_osum = df['include_osum'].iloc[0] if 'include_osum' in df.columns else True
-        seed = df['seed'].iloc[0] if 'seed' in df.columns else 42
-        
-        print(f"Loaded CSV with summary data only")
-    else:
-        print("Unsupported file type. Use .pkl or .csv files.")
+
+    if not file_path.endswith('.pkl'):
+        print("Error: Rerun requires a .pkl file to ensure all data is available.")
         return
+
+    with open(file_path, "rb") as f:
+        data = pickle.load(f)
+
+    df = data['summary_df']
+    K = data['K']
+    K_outliers = data['K_outliers']
+    seed = data['seed']
+    if not osum_flag_for_plot:
+        print("Filtering out OSUM methods for Figure 4 generation...")
+        methods_to_exclude = ['permABC-SMC-OS', 'permABC-SMC-UM']
+        df_filtered = df[~df['method'].isin(methods_to_exclude)].copy()
+    else:
+        df_filtered = df
+    # Determine the figure number based on the current command, not the loaded file.
+    fig_num_str = "fig4" if not osum_flag_for_plot else "fig6"
+    print(f"Recreating {fig_num_str} for K={K}, K_outliers={K_outliers}, seed={seed}")
     
-    print(f"Recreating plots for K={K}, K_outliers={K_outliers}, osum={include_osum}, seed={seed}")
-    print(f"Plot type: {plot_type}")
+    # Determine the output directory
+    if output_dir_override:
+        figures_dir = os.path.join(output_dir_override, "figures", fig_num_str)
+    else:
+        # Fallback to the directory of the pkl file
+        figures_dir = os.path.join(os.path.dirname(file_path), "..", "..", "figures", fig_num_str)
     
-    # Analyze performance
-    analyze_performance_metrics(df)
+    os.makedirs(figures_dir, exist_ok=True)
     
-    # Create plots based on plot_type
-    base_dir = os.path.dirname(file_path)
-    fig_num = "fig4" if not include_osum else "fig6"
+    # Create the plots
+    fig_nsim = create_nsim_plot(df_filtered, K, K_outliers, osum_flag_for_plot)
+    fig_nsim.savefig(os.path.join(figures_dir, f"{fig_num_str}_nsim_seed_{seed}.pdf"), dpi=300, bbox_inches='tight')
+    plt.close(fig_nsim)
     
-    if plot_type == 'nsim':
-        fig = create_nsim_plot(df, K, K_outliers, include_osum)
-        base_name = f"{fig_num}_nsim_seed_{seed}_rerun"
-        fig.savefig(os.path.join(base_dir, f"{base_name}.pdf"), dpi=300, bbox_inches='tight')
-        fig.savefig(os.path.join(base_dir, f"{base_name}.png"), dpi=300, bbox_inches='tight')
-        plt.close(fig)
-        print(f"Simulation efficiency plot recreated: {base_dir}/{base_name}.*")
-        
-    elif plot_type == 'time':
-        fig = create_time_plot(df, K, K_outliers, include_osum)
-        base_name = f"{fig_num}_time_seed_{seed}_rerun"
-        fig.savefig(os.path.join(base_dir, f"{base_name}.pdf"), dpi=300, bbox_inches='tight')
-        fig.savefig(os.path.join(base_dir, f"{base_name}.png"), dpi=300, bbox_inches='tight')
-        plt.close(fig)
-        print(f"Time efficiency plot recreated: {base_dir}/{base_name}.*")
-        
-    elif plot_type == 'both':
-        # Create both separate plots
-        fig_nsim = create_nsim_plot(df, K, K_outliers, include_osum)
-        base_name_nsim = f"{fig_num}_nsim_seed_{seed}_rerun"
-        fig_nsim.savefig(os.path.join(base_dir, f"{base_name_nsim}.pdf"), dpi=300, bbox_inches='tight')
-        fig_nsim.savefig(os.path.join(base_dir, f"{base_name_nsim}.png"), dpi=300, bbox_inches='tight')
-        plt.close(fig_nsim)
-        
-        fig_time = create_time_plot(df, K, K_outliers, include_osum)
-        base_name_time = f"{fig_num}_time_seed_{seed}_rerun"
-        fig_time.savefig(os.path.join(base_dir, f"{base_name_time}.pdf"), dpi=300, bbox_inches='tight')
-        fig_time.savefig(os.path.join(base_dir, f"{base_name_time}.png"), dpi=300, bbox_inches='tight')
-        plt.close(fig_time)
-        
-        # Also create combined plot
-        fig_combined = create_combined_plot(df, K, K_outliers, include_osum)
-        base_name_combined = f"{fig_num}_combined_seed_{seed}_rerun"
-        fig_combined.savefig(os.path.join(base_dir, f"{base_name_combined}.pdf"), dpi=300, bbox_inches='tight')
-        fig_combined.savefig(os.path.join(base_dir, f"{base_name_combined}.png"), dpi=300, bbox_inches='tight')
-        plt.close(fig_combined)
-        
-        print(f"All plots recreated: {base_dir}/{fig_num}_*_seed_{seed}_rerun.*")
+    fig_time = create_time_plot(df_filtered, K, K_outliers, osum_flag_for_plot)
+    fig_time.savefig(os.path.join(figures_dir, f"{fig_num_str}_time_seed_{seed}.pdf"), dpi=300, bbox_inches='tight')
+    plt.close(fig_time)
+    
+    print(f"Plots recreated in: {figures_dir}")
 
 
 def parse_arguments():
@@ -753,9 +738,9 @@ def main():
     """Main execution function."""
     args = parse_arguments()
     
-    # Handle rerun case
     if args.rerun:
-        rerun_from_file(args.rerun, args.plot)
+        # Pass the current command's flags to the rerun function
+        rerun_from_file(args.rerun, args.plot, args.include_osum, args.output_dir)
         return
     
     print("Performance comparison between ABC methods")

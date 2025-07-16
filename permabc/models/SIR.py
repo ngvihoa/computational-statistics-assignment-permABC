@@ -441,10 +441,105 @@ class SIRWithUnknownInit(ModelBase):
         n_particles = thetas.loc.shape[0]
         return jnp.zeros(n_particles)
 
+class SIR_real_world(ModelBase):
+    """
+    SIR model for real-world data analysis.
+    
+    This model uses a specific parameterization suitable for epidemiological inference:
+    - R0 is a global parameter, representing the basic reproduction number.
+    - gamma_k are local parameters, representing the recovery rate for each region k.
+    - beta_k are derived parameters: beta_k = R0 * gamma_k.
+    - Initial conditions (I0_k, R0_k) are also treated as local parameters.
+    """
+    def __init__(self, K, weights_distance=None, n_obs=100, n_pop=100000,
+                 low_I=.1, high_I=100, 
+                 low_R=0.0001, high_R=50,
+                 low_gamma=.0001, high_gamma=0.2,
+                 low_r0=0.0001, high_r0=1.5):
+        
+        # Correctly call the parent class's __init__ method
+        super().__init__(K, weights_distance)
+        self.n_obs = n_obs
+        self.n_pop = n_pop
+
+        # Define the parameter support ranges
+        self.support_par_loc = jnp.array([
+            [low_I, high_I],        # I0_k (Initial Infected)
+            [low_R, high_R],        # R0_k (Initial Recovered)
+            [low_gamma, high_gamma] # gamma_k (Recovery Rate)
+        ])
+        self.support_par_glob = jnp.array([
+            [low_r0, high_r0]       # R0_global (Basic Reproduction Number)
+        ])
+        
+        # Define parameter names and dimensions for clarity
+        self.loc_name = ["$I^0_{", "$R^0_{", "$\\gamma_{"]
+        self.glob_name = ["$R_0$"]
+        self.dim_loc = 3
+        self.dim_glob = 1
+
+    def prior_generator(self, key, n_particles, n_silos=0):
+        """Generates samples from the uniform prior distributions."""
+        if n_silos == 0:
+            n_silos = self.K
+            
+        key, key_loc, key_glob = random.split(key, 3)
+        
+        loc = random.uniform(
+            key_loc, shape=(n_particles, n_silos, self.dim_loc),
+            minval=self.support_par_loc[:, 0], 
+            maxval=self.support_par_loc[:, 1]
+        )
+        glob = random.uniform(
+            key_glob, shape=(n_particles, self.dim_glob),
+            minval=self.support_par_glob[:, 0], 
+            maxval=self.support_par_glob[:, 1]
+        )
+        return Theta(loc=loc, glob=glob)
+
+    def data_generator(self, key, thetas: Theta):
+        """Generates epidemic data from the given parameters."""
+        # Extract parameters from the Theta object
+        I0 = thetas.loc[:, :, 0]
+        R0_init = thetas.loc[:, :, 1]
+        gamma = thetas.loc[:, :, 2]
+        R0_global = thetas.glob
+        
+        # Derive beta from R0 and gamma
+        beta = R0_global * gamma
+        
+        # Ensure S0 is non-negative
+        S0 = jnp.maximum(0.0, self.n_pop - I0 - R0_init)
+        
+        # Correctly call the JAX-based SIR simulator
+        result = simulate_sir_jax(
+            S0, I0, R0_init, beta, gamma, 
+            n_pop=self.n_pop, 
+            n_obs=self.n_obs,
+            noise_key=key
+        )
+        return np.array(result)
+    
+    def prior_logpdf(self, thetas: Theta):
+        """Computes the log probability of the priors."""
+        n_particles = thetas.loc.shape[0]
+        n_regions = thetas.loc.shape[1]
+
+        # Calculate log density for uniform distributions
+        # log(1 / (max - min)) = -log(max - min)
+        log_density_loc = -jnp.sum(jnp.log(self.support_par_loc[:, 1] - self.support_par_loc[:, 0]))
+        log_density_glob = -jnp.sum(jnp.log(self.support_par_glob[:, 1] - self.support_par_glob[:, 0]))
+        
+        # Total log density is sum over all local parameters + global parameters
+        total_log_density = n_regions * log_density_loc + log_density_glob
+        
+        return jnp.full(n_particles, total_log_density)
+
 
 # Export key classes
 __all__ = [
     'SIRWithKnownInit',
     'SIRWithUnknownInit', 
-    'simulate_sir_jax'
+    'simulate_sir_jax',
+    'SIR_real_world'
 ]

@@ -114,7 +114,7 @@ def create_posterior_plot(results, true_theta):
     colors = plt.cm.viridis(np.linspace(0, 1, len(M0s)))
     
     # Setup plot
-    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+    fig, axes = plt.subplots(1, 2, figsize=(10, 5))
     fontsize = 12
     titlesize = 15
     
@@ -197,8 +197,8 @@ def save_results(results, true_theta, epsilon, K, seed, output_dir):
     base_name = f"fig2_seed_{seed}"
     fig.savefig(os.path.join(figures_dir, f"{base_name}.pdf"), 
                 dpi=300, bbox_inches='tight')
-    fig.savefig(os.path.join(figures_dir, f"{base_name}.png"), 
-                dpi=300, bbox_inches='tight')
+    # fig.savefig(os.path.join(figures_dir, f"{base_name}.png"), 
+    #             dpi=300, bbox_inches='tight')
     plt.close(fig)
     
     print(f"Figures saved to: {figures_dir}/{base_name}.*")
@@ -234,8 +234,8 @@ def rerun_from_pickle(pickle_path):
     base_name = f"fig2_seed_{seed}"
     fig.savefig(os.path.join(figures_dir, f"{base_name}.pdf"), 
                 dpi=300, bbox_inches='tight')
-    fig.savefig(os.path.join(figures_dir, f"{base_name}.png"), 
-                dpi=300, bbox_inches='tight')
+    # fig.savefig(os.path.join(figures_dir, f"{base_name}.png"), 
+    #             dpi=300, bbox_inches='tight')
     plt.show()
     plt.close(fig)
     print("Figures saved to:",  os.path.join(figures_dir, f"{base_name}.*"))

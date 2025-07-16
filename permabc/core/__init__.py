@@ -46,7 +46,6 @@ from .distances import (
     remove_under_matching,
     compute_distances_with_current_assignment,
     compute_local_distances_for_assignment,
-    optimal_index_distance_old  # Legacy version
 )
 
 # Kernel classes for parameter proposals

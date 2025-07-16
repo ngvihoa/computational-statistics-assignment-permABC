@@ -247,7 +247,7 @@ def create_comparison_plot(results, k=0):
     fontsize = 12
     alpha_fig = 0.25
     
-    fig, axes = plt.subplots(1, 2, figsize=(12, 5), tight_layout=True)
+    fig, axes = plt.subplots(1, 2, figsize=(10, 5), tight_layout=True)
     
     # ABC-Gibbs plot
     axes[0].set_aspect('equal')
@@ -320,10 +320,10 @@ def save_results(results, model, y_obs, true_theta, seed, N, K, output_dir):
     base_name = f"fig5_K_{K}_seed_{seed}"
     fig.savefig(os.path.join(figures_dir, f"{base_name}.pdf"), 
                 dpi=300, bbox_inches='tight')
-    fig.savefig(os.path.join(figures_dir, f"{base_name}.png"), 
-                dpi=300, bbox_inches='tight')
-    fig.savefig(os.path.join(figures_dir, f"{base_name}.svg"), 
-                dpi=300, bbox_inches='tight')
+    # fig.savefig(os.path.join(figures_dir, f"{base_name}.png"), 
+    #             dpi=300, bbox_inches='tight')
+    # fig.savefig(os.path.join(figures_dir, f"{base_name}.svg"), 
+    #             dpi=300, bbox_inches='tight')
     plt.close(fig)
     
     print(f"Figures saved to: {figures_dir}/{base_name}.*")
@@ -360,8 +360,8 @@ def rerun_from_pickle(pkl_path):
     base_name = f"fig5_K_{K}_seed_{seed}"
     fig.savefig(os.path.join(figures_dir, f"{base_name}.pdf"), 
                 dpi=300, bbox_inches='tight')
-    fig.savefig(os.path.join(figures_dir, f"{base_name}.png"), 
-                dpi=300, bbox_inches='tight')
+    # fig.savefig(os.path.join(figures_dir, f"{base_name}.png"), 
+    #             dpi=300, bbox_inches='tight')
     plt.show()
     
     print("Comparison plot recreated from pickle data.")

@@ -15,6 +15,17 @@ import os
 import sys
 import argparse
 import subprocess
+from pathlib import Path
+
+def find_project_root(marker_file='pyproject.toml'):
+    """Find the project root by searching upwards for a marker file."""
+    current_path = Path.cwd()
+    while current_path != current_path.parent:
+        if (current_path / marker_file).exists():
+            return current_path
+        current_path = current_path.parent
+    # Fallback if no marker file is found (less robust)
+    return Path(__file__).resolve().parents[2]
 
 
 def parse_arguments():
@@ -44,64 +55,84 @@ def parse_arguments():
 
 
 def main():
-    """Main execution function that calls run_performance_comparison with osum=False."""
+    """
+    Main execution. Checks for existing results (including from fig6)
+    before running the full experiment.
+    """
     args = parse_arguments()
-    
+
     print("Figure 4: Performance comparison without OSUM methods")
-    print(f"Parameters: K={args.K}, K_outliers={args.K_outliers}, seed={args.seed}")
-    print(f"N_points={args.N_points:,}, N_particles={args.N_particles:,}")
-    print(f"Plot type: {args.plot}")
+
+    # --- Path Construction ---
+    project_root = find_project_root()
+    scripts_dir = project_root / "experiments" / "scripts"
+    results_dir = project_root / "experiments" / "results" / "performance_comparison"
     
-    # Path to the main performance comparison script
-    script_path = os.path.join(os.path.dirname(__file__), 'run_performance_comparison.py')
+    # Corrected: Set the output directory for the main script to the project root.
+    # The main script will handle creating subdirectories like /figures/fig4/.
+    output_dir_for_main_script = project_root
     
-    # Build command arguments
-    cmd_args = [
-        sys.executable, script_path,
-        '--K', str(args.K),
-        '--K_outliers', str(args.K_outliers),
-        '--seed', str(args.seed),
-        '--N_points', str(args.N_points),
-        '--N_particles', str(args.N_particles),
-        '--plot', args.plot,
-        '--output-dir', args.output_dir,
-        '--no-osum'  # Disable over-sampling and under-matching
-    ]
-    
-    # Add rerun argument if provided
+    main_script_path = scripts_dir / 'run_performance_comparison.py'
+
+    # --- Check for existing results to reuse ---
+
+    # 1. Define path for the specific results file (osum=False)
+    results_filename_no_osum = f"performance_K_{args.K}_outliers_{args.K_outliers}_osum_False_seed_{args.seed}.pkl"
+    results_filepath_no_osum = results_dir / results_filename_no_osum
+
+    # 2. Define path for the comprehensive results file (osum=True, from fig6)
+    results_filename_with_osum = f"performance_K_{args.K}_outliers_{args.K_outliers}_osum_True_seed_{args.seed}.pkl"
+    results_filepath_with_osum = results_dir / results_filename_with_osum
+
+    rerun_path = None
     if args.rerun:
-        cmd_args.extend(['--rerun', args.rerun])
+        rerun_path = args.rerun
+        print(f"User specified --rerun. Using file: {rerun_path}")
+    elif results_filepath_no_osum.exists():
+        rerun_path = str(results_filepath_no_osum)
+        print(f"✅ Found specific results file (osum=False). Re-running in plot-only mode from: {rerun_path}")
+    elif results_filepath_with_osum.exists():
+        rerun_path = str(results_filepath_with_osum)
+        print(f"✅ Found comprehensive results file (osum=True). Using it to generate Figure 4.")
     
-    print(f"Executing: {' '.join(cmd_args)}")
+    # --- Build the command to execute ---
     
-    # Execute the main script
-    result = subprocess.run(cmd_args)
-    
-    if result.returncode == 0:
-        print("\nFigure 4 generation complete!")
-        print("This figure shows the performance comparison between:")
-        print("  - ABC-Vanilla vs permABC-Vanilla")
-        print("  - ABC-SMC vs permABC-SMC")  
-        print("  - ABC-PMC")
-        
-        if args.plot == 'nsim':
-            print("Plot generated: Simulation efficiency only")
-        elif args.plot == 'time':
-            print("Plot generated: Time efficiency only")
-        else:
-            print("Plots generated: Both simulation and time efficiency (separate files)")
-            
-        print("Note: Over-sampling and under-matching methods are excluded")
-        if args.K_outliers == 0:
-            print("  - No outliers added (standard scenario)")
-        else:
-            print(f"  - {args.K_outliers} outlier components added")
+    if rerun_path:
+        # If we found ANY file to rerun from, build the rerun command
+        cmd_args = [
+            sys.executable, str(main_script_path),
+            '--rerun', rerun_path,
+            '--output-dir', str(output_dir_for_main_script),
+            '--plot', args.plot,
+            '--no-osum'  # <<< Important: Still tell the script to process as fig4
+        ]
     else:
-        print(f"Error: Script failed with return code {result.returncode}")
+        # Otherwise, build the command for a full run
+        print("No suitable results file found. Running full experiment...")
+        cmd_args = [
+            sys.executable, str(main_script_path),
+            '--K', str(args.K),
+            '--K_outliers', str(args.K_outliers),
+            '--seed', str(args.seed),
+            '--N_points', str(args.N_points),
+            '--N_particles', str(args.N_particles),
+            '--plot', args.plot,
+            '--output-dir', str(output_dir_for_main_script),
+            '--no-osum'
+        ]
+
+    # --- Execute the command ---
     
-    # Return the same exit code as the subprocess
-    sys.exit(result.returncode)
-
-
+    print(f"\nExecuting: {' '.join(cmd_args)}\n")
+    try:
+        # Use check=True to automatically raise an error if the script fails
+        subprocess.run(cmd_args, check=True)
+        print("\nFigure 4 generation complete!")
+    except subprocess.CalledProcessError as e:
+        print(f"\nError: Script failed with return code {e.returncode}")
+        sys.exit(e.returncode)
+    except KeyboardInterrupt:
+        print("\nExperiment interrupted by user.")
+        sys.exit(1)
 if __name__ == "__main__":
     main()
