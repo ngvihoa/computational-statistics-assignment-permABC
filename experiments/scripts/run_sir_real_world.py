@@ -39,10 +39,10 @@ def check_and_run_sir_inference(results_dir: str, seed: int, force_rerun: bool =
     all_files_exist = all(f.exists() for f in expected_files)
     
     if all_files_exist and not force_rerun:
-        print("✅ All required SIR inference files found.")
+        print("All required SIR inference files found.")
         return
 
-    print("🔥 One or more SIR files missing or rerun forced. Generating new results...")
+    print("One or more SIR files missing or rerun forced. Generating new results...")
     this_script_path = Path(__file__).resolve()
     
     cmd = [sys.executable, str(this_script_path), '--seed', str(seed), '--results-dir', results_dir]
@@ -152,7 +152,7 @@ def save_single_inference(result: dict, scale: str, metadata: dict, results_dir:
     
     with open(file_path, "wb") as f:
         pickle.dump(save_data, f)
-    print(f"✅ Results for '{scale}' saved to: {file_path}")
+    print(f"Results for '{scale}' saved to: {file_path}")
 
 def parse_arguments():
     """Parse command line arguments for direct execution."""
