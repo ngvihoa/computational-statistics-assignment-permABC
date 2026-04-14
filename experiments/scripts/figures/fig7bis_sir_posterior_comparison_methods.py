@@ -40,12 +40,13 @@ def _fig_path(scale, seed):
 # ── Method definitions ───────────────────────────────────────────────────────
 
 METHODS = [
-    ("permABC-SMC",    "perm_smc",         "#1f77b4"),
-    ("permABC-SMC-G2", "perm_smc_g2",      "#2ca02c"),
-    ("ABC-Gibbs",      "abc_gibbs",        "#d62728"),
-    ("ABC-Gibbs-True", "abc_gibbs_true",   "#ff7f0e"),
-    ("permABC-SMC-OS", "perm_smc_os",      "#e377c2"),
-    ("permABC-SMC-UM", "perm_smc_um",      "#9467bd"),
+    ("permABC-SMC",              "perm_smc",         "#1f77b4"),
+    ("ABC-SMC (Gibbs 3b)",       "abc_smc_g3",       "#d62728"),
+    ("permABC-SMC (Gibbs 3b)",   "perm_smc_g3",      "#2ca02c"),
+    ("ABC-Gibbs",                "abc_gibbs_true",    "#ff7f0e"),
+    ("ABC-SMC",                  "abc_smc",           "#8c564b"),
+    ("permABC-SMC-OS",           "perm_smc_os",       "#e377c2"),
+    ("permABC-SMC-UM",           "perm_smc_um",       "#9467bd"),
 ]
 
 
