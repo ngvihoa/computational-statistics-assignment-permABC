@@ -7,16 +7,14 @@ This approach can improve computational efficiency and convergence speed.
 """
 
 from ..utils.functions import ess, resampling  # Fixed relative import
-from ..core.distances import optimal_index_distance  # Fixed relative import
-from ..core.moves import move_smc, move_smc_gibbs_blocks, calculate_overall_acceptance_rate  # Fixed relative import
+from ..assignment import optimal_index_distance
+from ..sampling import move_smc, move_smc_gibbs_blocks, calculate_overall_acceptance_rate
 from ..algorithms.smc import update_weights, _init_smc_tracking, _update_smc_tracking, _compute_smc_diagnostics, _compile_smc_results  # Fixed relative import
 import numpy as np
 from jax import random
 import time
 from scipy.special import gammaln   
 from typing import Tuple, Optional, Any, Dict, List
-import numpy as np
-from jax import random
 
 
 
@@ -31,7 +29,8 @@ def init_perm_under_matching(
     L_0: int,
     alpha_epsilon: float,
     verbose: int = 1,
-    update_weight_distance: bool = True
+    update_weight_distance: bool = True,
+    cascade=None,
 ) -> Tuple[
     Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray],
     Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray],
@@ -96,7 +95,8 @@ def init_perm_under_matching(
     
     # Compute optimal assignment with L_0 < K components
     distance_values, ys_index, zs_index, n_lsa = optimal_index_distance(
-        zs=zs, y_obs=y_obs, model=model, verbose=verbose, epsilon=epsilon, L=L_0
+        zs=zs, y_obs=y_obs, model=model, verbose=verbose, epsilon=epsilon, L=L_0,
+        cascade=cascade,
     )
     
     if verbose > 1:
@@ -141,7 +141,8 @@ def init_perm_under_matching(
         
         distance_values[alive], ys_index[alive], zs_index[alive], n_lsa = optimal_index_distance(
             zs=zs[alive], y_obs=y_obs, model=model, verbose=verbose, epsilon=epsilon, L=L_0, 
-            zs_index=zs_index[alive], ys_index=ys_index[alive]
+            zs_index=zs_index[alive], ys_index=ys_index[alive],
+            cascade=cascade,
         )
         
         weights = update_weights(weights, distance_values, epsilon)
@@ -169,7 +170,8 @@ def perm_abc_smc_um(
     num_blocks_gibbs: int = 0,
     update_weights_distance: bool = False,
     verbose: int = 1,
-    stopping_acc_rate: float = 0.0
+    stopping_acc_rate: float = 0.0,
+    cascade=None,
 ) -> Optional[Dict[str, Any]]:
     """
     Permutation-enhanced ABC-SMC with under-matching strategy.
@@ -258,7 +260,8 @@ def perm_abc_smc_um(
     init_result = init_perm_under_matching(
         key, model, n_particles, y_obs, epsilon, L_0, 
         verbose=verbose, alpha_epsilon=alpha_epsilon, 
-        update_weight_distance=update_weights_distance
+        update_weight_distance=update_weights_distance,
+        cascade=cascade,
     )
     
     if init_result[0] is None:
@@ -278,7 +281,7 @@ def perm_abc_smc_um(
     })
     
     # Initialize diagnostics
-    initial_diagnostics = _compute_smc_diagnostics(thetas, n_particles)
+    initial_diagnostics = _compute_smc_diagnostics(thetas, n_particles, skip=(verbose < 1))
     results_data.update({
         'Unique_p': [initial_diagnostics['unique_part']], 
         'Unique_c': [initial_diagnostics['unique_comp']],
@@ -315,11 +318,13 @@ def perm_abc_smc_um(
                   f"unique particles", end=" ")
         
         # Reset assignment indices for new L
-        ys_index, zs_index = -np.ones((n_particles, L)), -np.ones((n_particles, L))
+        ys_index = -np.ones((n_particles, L), dtype=np.int32)
+        zs_index = -np.ones((n_particles, L), dtype=np.int32)
         
         # Compute optimal assignment with current L
         distance_values[alive], ys_index[alive], zs_index[alive], n_lsa = optimal_index_distance(
-            zs=zs[alive], y_obs=y_obs, model=model, verbose=verbose, epsilon=epsilon, L=L
+            zs=zs[alive], y_obs=y_obs, model=model, verbose=verbose, epsilon=epsilon, L=L,
+            cascade=cascade,
         )
         
         # Update weights
@@ -373,7 +378,8 @@ def perm_abc_smc_um(
                 key=key_move, model=model, thetas=thetas[alive], zs=zs[alive], 
                 weights=weights[alive], ys_index=ys_index[alive], zs_index=zs_index[alive], 
                 epsilon=epsilon, y_obs=y_obs, distance_values=distance_values[alive], 
-                kernel=kernel, verbose=verbose, perm=True, L=L
+                kernel=kernel, verbose=verbose, perm=True, L=L,
+                cascade=cascade,
             )
             
             # Update particles
@@ -394,7 +400,8 @@ def perm_abc_smc_um(
                 key=key_move, model=model, thetas=thetas[alive], zs=zs[alive], 
                 weights=weights[alive], ys_index=ys_index[alive], zs_index=zs_index[alive], 
                 epsilon=epsilon, y_obs=y_obs, distance_values=distance_values[alive], 
-                kernel=kernel, H=num_blocks_gibbs, verbose=verbose, perm=True, L=L
+                kernel=kernel, H=num_blocks_gibbs, verbose=verbose, perm=True, L=L,
+                cascade=cascade,
             )
             
             # Update particles
@@ -426,7 +433,8 @@ def perm_abc_smc_um(
             
             distance_values[alive], ys_index[alive], zs_index[alive], n_lsa = optimal_index_distance(
                 zs=zs[alive], y_obs=y_obs, model=model, verbose=verbose, epsilon=epsilon, L=L, 
-                zs_index=zs_index[alive], ys_index=ys_index[alive]
+                zs_index=zs_index[alive], ys_index=ys_index[alive],
+                cascade=cascade,
             )
             
             weights = update_weights(weights, distance_values, epsilon)
@@ -457,7 +465,7 @@ def perm_abc_smc_um(
             zs_index = np.repeat([np.arange(model.K)], n_particles, axis=0)
         
         # Compute diagnostics
-        diagnostics = _compute_smc_diagnostics(thetas, n_particles)
+        diagnostics = _compute_smc_diagnostics(thetas, n_particles, skip=(verbose < 1))
         
         # Display progress
         if verbose > 0:

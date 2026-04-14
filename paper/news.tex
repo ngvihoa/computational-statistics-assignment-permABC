@@ -1,0 +1,107 @@
+\documentclass[11pt]{article}
+
+% Basic packages
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage[a4paper,margin=1in]{geometry}
+\usepackage{amsmath,amssymb,amsthm,mathtools}
+\usepackage{bm}
+\usepackage{enumitem}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{microtype}
+
+% Theorem environments
+\newtheorem{proposition}{Proposition}
+\newtheorem{remark}{Remark}
+\newtheorem{conjecture}{Conjecture}
+\newtheorem{question}{Question}
+
+% Shortcuts
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\Pp}{\mathcal{P}_p}
+\newcommand{\eps}{\varepsilon}
+\newcommand{\iid}{\mathrel{\overset{\mathrm{i.i.d.}}{\sim}}}
+\newcommand{\toP}{\xrightarrow{\mathbb P}}
+\newcommand{\toD}{\xrightarrow{\mathcal D}}
+\newcommand{\RightarrowW}{\Rightarrow}
+\newcommand{\W}{W_p}
+\newcommand{\permABC}{\textsc{permABC}}
+\newcommand{\WABC}{\textsc{WABC}}
+
+\title{Notes on New Theoretical Directions for \permABC}
+\author{Working notes for discussion with co-authors}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+These notes collect a possible new theoretical angle for \permABC, centered on its relation to
+Wasserstein ABC and on two asymptotic regimes that appear natural in the hierarchical setting:
+large number of observed compartments $K \to \infty$, and large over-sampling size
+$M \to \infty$. The goal is not to state definitive results yet, but to provide a clean framework
+for discussion, isolate plausible statements, and identify the points that should be formalized in
+future work.
+\end{abstract}
+
+\tableofcontents
+
+\section{Motivation and purpose of these notes}
+
+The purpose of this short note is to present a possible extension of the current \permABC
+story in a form that can be discussed with co-authors before deciding whether any of it should
+enter the paper.
+
+The main ideas are the following.
+\begin{enumerate}[label=(\arabic*)]
+    \item \permABC can be viewed as a hierarchical analogue of \WABC at the level of
+    empirical distributions of \emph{compartments}.
+    \item This suggests a natural asymptotic regime when the number of compartments
+    $K \to \infty$.
+    \item The over-sampling bridge $M > K$ has a qualitatively different asymptotic behaviour:
+    for large $M$, the global marginal tends to become prior-like, whereas the matched local
+    variables become extreme-value / best-match objects, often nearly Dirac.
+\end{enumerate}
+
+The point of these notes is therefore to organize these observations into a coherent narrative and
+make explicit which parts seem rigorous, which parts are currently heuristic, and which questions
+could realistically be turned into formal results.
+
+\input{sections/asymptotics.tex}
+
+\section{Practical discussion points for co-authors}
+
+At this stage, the most useful questions for discussion seem to be:
+\begin{enumerate}[label=(\arabic*)]
+    \item Should the $K \to \infty$ discussion appear in the main paper, the supplement, or only
+    in internal notes for now?
+    \item Do we want to state the large-$K$ argument only for the global parameter $\beta$,
+    leaving the local parameters $\mu_{1:K}$ explicitly outside the main theorem?
+    \item Do we want to include a formal proposition explaining why large-$M$ over-sampling is
+    not an inferential target, but only an algorithmic bridge?
+    \item Would it be worth adding a simple toy example in which the large-$M$ behaviour can be
+    shown analytically, e.g. a deterministic or Gaussian local model?
+    \item Is there a clean way to phrase the projected local variables as transport witnesses,
+    selected latent explanations, or approximate Monge matches?
+\end{enumerate}
+
+\section{Suggested next steps}
+
+A possible sequence of next steps would be:
+\begin{enumerate}[label=(\arabic*)]
+    \item Clean the notation so that the WABC comparison uses exactly the same symbols as the
+    current paper.
+    \item Decide which parts are intended as theorem/proposition material and which parts should
+    remain discussion/conjecture.
+    \item Build one toy model where the $M \to \infty$ phenomenon is explicit.
+    \item If the co-authors agree, turn the large-$K$ part into a concise proposition linked to the
+    WABC literature.
+\end{enumerate}
+
+\end{document}
+

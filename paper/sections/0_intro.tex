@@ -1,0 +1,59 @@
+Approximate Bayesian Computation (ABC) \citep{marinApproximateBayesianComputational2012a} has emerged as a pivotal tool for statistical inference in scenarios where the likelihood function is computationally infeasible or explicitly unavailable. Initially applied in population genetics by \citet{tavareInferringCoalescenceTimes1997} and extended by \citet{pritchardPopulationGrowthHuman1999a}, ABC has found applications across various fields such as climate science \citep{holden2018abc}, ecology \citep{piccioni2022calibration}, and epidemiology \citep{sissonHandbookApproximateBayesian2018}. The key idea behind ABC is to simulate data under the prior predictive distribution and retain simulations $\simdata$ that are close to the observed data $\obsdata$, thereby avoiding explicit likelihood computations. This comparison relies on a metric $d$ and a tolerance threshold $\varepsilon > 0$: we accept when $d(\obsdata, \simdata)\leq\varepsilon$. ABC methods are thus particularly useful for highly complex models, for which it is difficult to calculate the likelihood but easy to simulate synthetic data.
+
+Challenges arise for large datasets and for large parameter space. 
+To reduce the dimensionality of the data, summary statistics are typically employed. Practitioners aim to select informative summaries and to choose $\varepsilon$ as small as computationally feasible, as tighter thresholds yield posterior approximations of higher fidelity. The problem of constructing such summaries has received considerable attention. For example, \citet{fearnheadConstructingSummaryStatistics2012} proposed an inferential criterion for summary statistic selection to improve posterior accuracy. Many applications rely on a small number of expert-informed summary statistics.
+
+Significant methodological progress has been made by integrating Monte Carlo techniques into ABC, to facilitate the exploration of the parameter space. Among these, Markov Chain Monte Carlo (MCMC) and Sequential Monte Carlo (SMC) strategies have been particularly influential. \citet{marjoramMarkovChainMonte2003a} proposed ABC-MCMC, which uses a Markov chain to guide parameter proposals toward regions of high posterior mass. Later, \citet{sisson2007sequential} introduced the Partial Rejection Control (PRC-ABC) algorithm, adopting a particle-based perspective. However, this method suffered from biased weighting issues \citep{sissonCorrectionSissonSequential2009}. 
+To resolve these limitations, \citet{beaumontAdaptiveApproximateBayesian2009b} proposed ABC-PMC, which combines importance sampling and adaptive kernel scaling. This innovation led to improved efficiency and more accurate posterior approximations. Subsequently, \citet{delmoralAdaptiveSequentialMonte2012} provided a theoretical framework for ABC-SMC using backward kernels and adaptive thresholding, which further enhanced robustness and convergence. These algorithmic refinements, particularly in the context of SMC, have made ABC applicable to increasingly complex models and larger datasets. Still, the field continues to evolve, as illustrated by recent work on guided proposals and adaptivity \citep{picchini2024guided}.
+
+Despite these advances, standard ABC approaches remain challenged by high-dimensional problems and parameter dependencies. To address this, Gibbs-inspired strategies have been proposed, which capitalize on model structure to update parameters conditionally. \citet{clarte2021componentwise} and \citet{rodrigues2020likelihood} introduced independently a likelihood-free Gibbs sampling scheme where each parameter block is updated using its approximate conditional distribution via ABC. 
+\citet{clarte2021componentwise} established theoretical convergence guarantees for ABC-Gibbs under partial independence, demonstrating substantial gains in efficiency and approximation quality, particularly in hierarchical contexts. These contributions expand the ABC toolbox toward more scalable and modular inference schemes.
+
+Motivated by these developments, we turn our attention to a specific class of hierarchical models commonly encountered in applied settings where observations are naturally grouped into independent subpopulations or \emph{compartments}. 
+As a motivating example, to which we return in Section \ref{sec:sir}, consider the popular Susceptible-Infectious-Recovered model in epidemiology: we wish to apply this model to the early phases of the COVID epidemic in France, with data observed locally at the level of each of $94$ \emph{d\'epartements}; initial exploration shows that certain parameters are global (constant across the whole country) but others are local (they vary between the départements).   
+This structure suggests a new inference framework that exploits exchangeability across compartments.
+
+More generally, we consider a setting where the data are divided into $K$ compartments. In each compartment $k = 1, \dots, K$, we observe $n$ data points $\obsdata_k = (\obsdataUn_k^1, \dots, \obsdataUn_k^n) \in \dataspace$, which depend on a shared global parameter $\globparam$ (with prior $\pi_\globparam$) and a compartment-specific local parameter $\locparam_k$. We assume that $(\mu_k, \obsdata_k)_{k=1}^K$ are exchangeable conditional on $\globparam$; a typical application is when the local parameters are independent and identically distributed $\mu_1,\ldots,\mu_K\sim\pi_\mu$. Collectively, the full dataset is denoted by $\obsdata := (\obsdata_1, \dots, \obsdata_K) \in \dataspace^K$, and the parameter vector by $\param = (\globparam, \locparam_{1}, \dots, \locparam_{K}) \in \parset$, with total dimension $d = K\dloc + \dglob$, where $\dloc$ and $\dglob$ are respectively the dimensions of the local and global parameters. 
+Such a hierarchical model is illustrated in Figure \ref{fig:hier}.
+
+Let $\mathcal S_K$ be the symmetric group over $\{1,\ldots,K\}$. 
+We define the permuted parameter vector $\param_{\sigma} = (\globparam, \locparam_{\sigma(1)}, \dots, \locparam_{\sigma(K)})$, where $\sigma \in \mathcal{S}_K$ is a permutation of the compartments. We assume that each $\obsdata_k$ is generated independently from a common likelihood function $g$, conditional on its corresponding parameters. In this context, exchangeability implies that the joint data distribution is invariant under permutations: $f(\obsdata\mid \param) = \prod_{k = 1}^K g(\obsdata_k\mid \globparam,\locparam_k) = f(\obsdata_{\sigma} \mid \param_{\sigma})$ for any $\sigma \in \mathcal{S}_K$. 
+
+We further assume that the likelihood $g$ is intractable or computationally costly, though we can simulate from it. That is, given $(\globparam,\locparam_k)$, we can generate pseudo-data $\obsdata_k$. By abuse of notation, we refer to the global simulator as the global likelihood $f$ throughout.
+
+%Building on the exchangeability property, we introduce a novel ABC method—\emph{permABC}—that incorporates permutations of data and parameters across compartments. A similar idea of leveraging permutation symmetry for inference has recently been explored in the context of binary response data by \citet{christensen2024inference}. \rr{Je ne vois pas le rapport avec Christensen}
+
+Building on the exchangeability property, the main innovation of our work is to simulate synthetic data, then apply a well-chosen permutation to the compartments before checking the ABC acceptance criterion, yielding our \emph{permABC} algorithm, introduced in Section~\ref{secabc_to_permabc}. This strategy increases the acceptance probability by several orders of magnitude. 
+We consider sequential improvements in Section~\ref{sec:sequential}: we first introduce permABC-SMC, then  define new sequences of intermediate distribution for sequential strategies (Over-Sampling and Under-Matching); they are made possible by our use of permutations, and they improve efficiency and robustness in challenging regimes such as outliers or model mis-specification. Section~\ref{sec:numeric} provides a thorough empirical assessment of the proposed methods, including comparisons with classical ABC techniques, synthetic experiments highlighting the gains of permutation-based inference, and a real-world application to COVID-19 epidemic data in France.
+
+
+\begin{figure}
+\begin{center}
+\begin{tikzpicture}
+\matrix (mat) [matrix of math nodes, column sep=10pt, row sep=0pt, name=mat] {
+     & & \pi_\mu (\cdot) & & \\[23pt]
+     \mu_1 & \mu_2 & \ldots &   & \mu_K \\[20pt] 
+     \mathbf{y}_1 & \mathbf{y}_2 & \ldots &  & \mathbf{y}_K \\[20pt] 
+     & & \beta  & & \\[20pt]
+     & & \pi_\beta (\cdot) & & \\
+};
+
+% Flèches
+\foreach \column in {1, 2, 5}
+{   
+  \draw[->,>=latex] ([yshift=-2pt]mat-1-3) -- ([yshift=2pt]mat-2-\column.north);
+  \draw[->,>=latex] ([yshift=-2pt]mat-2-\column) -- ([yshift=2pt]mat-3-\column);
+  \draw[<-,>=latex] ([yshift=-2pt]mat-3-\column) -- ([yshift=2pt]mat-4-3);
+}
+
+\draw[<-,>=latex] ([yshift=-2pt]mat-4-3.south) -- ([yshift=2pt]mat-5-3.north);
+
+\node[align=center, right=6em of mat-3-3, yshift=1.7em, inner sep=5pt] (exchangeable) 
+    {\small $(\mu_k, \mathbf{y}_k)_{k=1}^K$ are exchangeable\\ \small conditionally on $\beta$};
+
+\end{tikzpicture}
+\end{center}
+\caption{Hierarchical model framework with exchangeable priors: $\mu_k \sim \pi_\mu(\cdot)$, $\beta \sim \pi_\beta(\cdot)$.}
+\label{fig:hier}
+\end{figure}
+

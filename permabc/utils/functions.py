@@ -2,7 +2,10 @@ from dataclasses import dataclass
 import jax.numpy as jnp
 from jax import random
 from jax import tree_util
-import particles  # tu peux le garder si tu veux, mais attention il n'est pas JAX-compatible
+try:
+    import particles  # optional; may fail due to numba/numpy constraints
+except Exception:  # pragma: no cover
+    particles = None
 import numpy as np
 
 import jax.numpy as jnp
@@ -17,26 +20,22 @@ class Theta:
     glob: jnp.ndarray  # shape (n_particles, dim_glob)
 
 
-    def __init__(self, loc = jnp.array([[[]]]), glob = jnp.array([[]])):
+    def __init__(self, loc=None, glob=None):
         """
         Initialize Theta with local and global parameters.
         
-        Parameters
-        ----------
-        loc : jnp.ndarray
-            Local parameters of shape (n_particles, K, dim_loc).
-        glob : jnp.ndarray
-            Global parameters of shape (n_particles, dim_glob).
+        Accepts both NumPy and JAX arrays. Stores whatever type is passed
+        to avoid unnecessary conversions in performance-critical loops.
         """
-        self.loc = jnp.asarray(loc)
-        self.glob = jnp.asarray(glob)
+        if loc is None:
+            loc = np.empty((0, 0, 0))
+        if glob is None:
+            glob = np.empty((0, 0))
+        self.loc = np.asarray(loc) if isinstance(loc, np.ndarray) else jnp.asarray(loc)
+        self.glob = np.asarray(glob) if isinstance(glob, np.ndarray) else jnp.asarray(glob)
     
     def __post_init__(self):
-        """
-        Post-initialization to ensure loc and glob are JAX arrays.
-        """
-        self.loc = jnp.asarray(self.loc)
-        self.glob = jnp.asarray(self.glob)
+        pass
 
     def tree_flatten(self):
         children = (self.loc, self.glob)
@@ -48,13 +47,13 @@ class Theta:
         return cls(*children)
 
     def apply_permutation(self, perm):
-        # perm: shape (n_particles, K)
-        idx = jnp.arange(self.loc.shape[0])[:, None]
-        new_loc = self.loc[idx, perm]
-        return Theta(loc=new_loc, glob=self.glob)
+        loc_np = np.asarray(self.loc)
+        idx = np.arange(loc_np.shape[0])[:, None]
+        new_loc = loc_np[idx, np.asarray(perm)]
+        return Theta(loc=new_loc, glob=np.asarray(self.glob))
 
     def __getitem__(self, index):
-        return Theta(loc=self.loc[index], glob=self.glob[index])
+        return Theta(loc=np.asarray(self.loc)[index], glob=np.asarray(self.glob)[index])
     
             
     def append(self, value):
@@ -77,42 +76,47 @@ class Theta:
         value_is_empty = (value.loc.size == 0 or value.glob.size == 0)
         
         if self_is_empty and value_is_empty:
-            # Both are empty, return empty
-            return Theta(loc=jnp.empty((0, self.loc.shape[1], self.loc.shape[2])),
-                        glob=jnp.empty((0, self.glob.shape[1])))
+            return Theta(loc=np.empty((0, self.loc.shape[1], self.loc.shape[2])),
+                        glob=np.empty((0, self.glob.shape[1])))
         
         elif self_is_empty:
-            # Self is empty, return copy of value
             return value.copy()
         
         elif value_is_empty:
-            # Value is empty, return copy of self
             return self.copy()
         
         else:
-            # Both have data, concatenate
-            new_loc = jnp.concatenate([self.loc, value.loc], axis=0)
-            new_glob = jnp.concatenate([self.glob, value.glob], axis=0)
+            new_loc = np.concatenate([np.asarray(self.loc), np.asarray(value.loc)], axis=0)
+            new_glob = np.concatenate([np.asarray(self.glob), np.asarray(value.glob)], axis=0)
             return Theta(loc=new_loc, glob=new_glob)
         
     def __setitem__(self, key, value):
+        loc = self._ensure_numpy(self.loc)
+        glob = self._ensure_numpy(self.glob)
+        val_loc = np.asarray(value.loc)
+        val_glob = np.asarray(value.glob)
+        
         if isinstance(key, (jnp.ndarray, np.ndarray)) and key.dtype == bool:
-            # Indices dans l'espace original
-            indices = jnp.where(key)[0]
-            # Indices séquentiels pour value (0, 1, 2, ..., len(value)-1)
-            value_indices = jnp.arange(len(value))
-            
-            self.loc = self.loc.at[indices].set(value.loc[value_indices])
-            self.glob = self.glob.at[indices].set(value.glob[value_indices])
+            loc[key] = val_loc
+            glob[key] = val_glob
         else:
-            # Cas normal
-            self.loc = self.loc.at[key].set(value.loc)
-            self.glob = self.glob.at[key].set(value.glob)
+            loc[key] = val_loc
+            glob[key] = val_glob
+        self.loc = loc
+        self.glob = glob
+    
+    @staticmethod
+    def _ensure_numpy(arr):
+        """Convert to a writable numpy array if needed."""
+        out = np.asarray(arr)
+        if not out.flags.writeable:
+            out = out.copy()
+        return out
             
     def reshape_2d(self):
         n_particles = self.loc.shape[0]
-        flat_loc = self.loc.reshape(n_particles, -1)
-        return jnp.concatenate([flat_loc, self.glob], axis=1)
+        flat_loc = np.asarray(self.loc).reshape(n_particles, -1)
+        return np.concatenate([flat_loc, np.asarray(self.glob)], axis=1)
 
     def shape(self):
         return self.loc.shape, self.glob.shape
@@ -121,22 +125,18 @@ class Theta:
         return self.loc.shape[0]
 
     def truncating(self, new_M, old_M):
-        # Remove the old_M-th component from each K
-        # Concatenate all components before new_M and after old_M
-        loc_trunc = jnp.concatenate([self.loc[:, :new_M], self.loc[:, old_M:]], axis=1)
-        return Theta(loc=loc_trunc, glob=self.glob)
+        loc_np = np.asarray(self.loc)
+        loc_trunc = np.concatenate([loc_np[:, :new_M], loc_np[:, old_M:]], axis=1)
+        return Theta(loc=loc_trunc, glob=np.asarray(self.glob))
 
     def duplicate(self, n_duplicate, perm_duplicated):
-        # Duplicate each particle n_duplicate times
-        n_particles = self.loc.shape[0]
-        total = n_particles * n_duplicate
-        new_loc = jnp.repeat(self.loc, repeats=n_duplicate, axis=0)
-        new_glob = jnp.repeat(self.glob, repeats=n_duplicate, axis=0)
+        new_loc = np.repeat(np.asarray(self.loc), repeats=n_duplicate, axis=0)
+        new_glob = np.repeat(np.asarray(self.glob), repeats=n_duplicate, axis=0)
         duplicated = Theta(loc=new_loc, glob=new_glob)
         return duplicated.apply_permutation(perm_duplicated)
 
     def __eq__(self, other):
-        return jnp.all(self.loc == other.loc) and jnp.all(self.glob == other.glob)
+        return np.all(np.asarray(self.loc) == np.asarray(other.loc)) and np.all(np.asarray(self.glob) == np.asarray(other.glob))
 
     def __ne__(self, other):
         return not self.__eq__(other)
@@ -153,8 +153,8 @@ class Theta:
             Theta: Nouvelle instance avec copies des arrays
         """
         return Theta(
-            loc=jnp.copy(self.loc),
-            glob=jnp.copy(self.glob)
+            loc=np.array(self.loc, copy=True),
+            glob=np.array(self.glob, copy=True)
         )
     
     def __copy__(self):
@@ -164,8 +164,8 @@ class Theta:
     def __deepcopy__(self, memo):
         """Support pour copy.deepcopy()"""
         return Theta(
-            loc=jnp.copy(self.loc),
-            glob=jnp.copy(self.glob)
+            loc=np.array(self.loc, copy=True),
+            glob=np.array(self.glob, copy=True)
         )
     
     # Méthodes utilitaires supplémentaires qui peuvent être utiles
@@ -307,11 +307,43 @@ def theta_ones_like(theta_template):
 # Fonction de resampling (⚠️ particles.resampling est probablement non JAX-friendly)
 # Si tu veux une version 100% JAX, je peux t'en écrire une
 def resampling(key, weight, L_to_resample, n_particles=0):
+    """
+    Systematic resampling.
+
+    If optional dependency `particles` is available, use it.
+    Otherwise, fall back to a NumPy/JAX implementation (no numba).
+    """
     if n_particles == 0:
         n_particles = len(weight)
-    index = particles.resampling.systematic(weight, n_particles)
+
+    if particles is not None:
+        index = particles.resampling.systematic(weight, n_particles)
+        return [x[index] for x in L_to_resample]
+
+    # Fallback: systematic resampling using cumulative sums.
+    w = np.asarray(weight, dtype=float).reshape(-1)
+    w = np.clip(w, 0.0, np.inf)
+    sw = np.sum(w)
+    if sw <= 0:
+        # Degenerate case: uniform
+        w = np.ones_like(w) / len(w)
+    else:
+        w = w / sw
+
+    cdf = np.cumsum(w)
+
+    # Sample u0 ~ Uniform(0, 1/n)
+    # (Using jax for RNG since `key` comes from jax.random.split)
+    try:
+        u0 = float(random.uniform(key, shape=())) / float(n_particles)
+    except Exception:
+        u0 = float(np.random.rand()) / float(n_particles)
+
+    positions = u0 + (np.arange(n_particles, dtype=float) / float(n_particles))
+    index = np.searchsorted(cdf, positions, side='left')
     return [x[index] for x in L_to_resample]
 
 
 def ess(weight):
-    return jnp.round(1.0 / jnp.sum(weight ** 2))
+    w = np.asarray(weight)
+    return float(np.round(1.0 / np.sum(w ** 2)))

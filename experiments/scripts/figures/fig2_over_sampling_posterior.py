@@ -2,311 +2,339 @@
 """
 Figure 2: Over-sampling posterior comparison.
 
-This script generates posterior distributions showing the effect of over-sampling
-on different values of M0 for a Gaussian model.
+Shows how the posterior changes as M (number of over-sampled components) increases
+from K to 10K on a Gaussian model.
 
 Usage:
     python fig2_over_sampling_posterior.py
     python fig2_over_sampling_posterior.py --K 10 --seed 42
-    python fig2_over_sampling_posterior.py --rerun  # Force new simulation
+    python fig2_over_sampling_posterior.py --rerun path/to/results.pkl
+    python fig2_over_sampling_posterior.py --force   # Force new simulation
 """
 
-import os
 import sys
+import argparse
+import pickle
+from pathlib import Path
+
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
-import pandas as pd
-import argparse
 from jax import random
 from scipy.stats import norm, invgamma
-import pickle
 
+# Shared plot config
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from plot_config import setup_matplotlib, save_figure, find_project_root
 
-from permabc.core.distances import optimal_index_distance
+setup_matplotlib()
+
+_PROJECT_ROOT = find_project_root()
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+
+from permabc.assignment.dispatch import optimal_index_distance
 from permabc.models.Gaussian_with_no_summary_stats import GaussianWithNoSummaryStats
 from permabc.utils.functions import Theta
 
-def setup_experiment(K=10, K_outliers=0, seed=42):
-    """Setup experimental parameters and generate synthetic data."""
-    # Configuration
+
+# ── Paths ────────────────────────────────────────────────────────────────────
+
+RESULTS_DIR = _PROJECT_ROOT / "experiments" / "results" / "over_sampling"
+FIGURES_DIR = _PROJECT_ROOT / "experiments" / "figures" / "fig2"
+
+
+def _pkl_path(K, seed):
+    return RESULTS_DIR / f"fig2_over_sampling_K_{K}_seed_{seed}.pkl"
+
+
+def _fig_path(K, seed):
+    return FIGURES_DIR / f"fig2_over_sampling_K_{K}_seed_{seed}.pdf"
+
+
+# ── Experiment ───────────────────────────────────────────────────────────────
+
+def setup_experiment(K=10, seed=42):
     key = random.PRNGKey(seed)
     key, subkey = random.split(key)
-    n = 100
-    sigma0 = 10
-    alpha, beta = 3., 5.
-    
-    # Initialize model
+    n = 10
+    sigma0 = 3
+    alpha, beta = 1.01, 1.
+
     model = GaussianWithNoSummaryStats(K=K, n_obs=n, sigma_0=sigma0, alpha=alpha, beta=beta)
     true_theta = model.prior_generator(subkey, 1)
-    
-    # Set specific values for clear visualization
-    true_theta = Theta(
-        glob=true_theta.glob.at[0, 0].set(10.),
-        loc=true_theta.loc.at[0, 0, 0].set(0.)
-    )
-    
+
+    glob = np.array(true_theta.glob)
+    loc = np.array(true_theta.loc)
+    glob[0, 0] = 1.
+    loc[0, 0, 0] = 0.
+    true_theta = Theta(glob=glob, loc=loc)
+
     print(f"True sigma2: {true_theta.glob[0, 0]}")
-    
-    # Generate observed data
+
     key, subkey = random.split(key)
     y_obs = model.data_generator(subkey, true_theta)
-    
+
     return model, y_obs, true_theta, key
 
 
 def run_over_sampling_posterior(key, model, y_obs, K):
-    """Run over-sampling analysis for different M0 values."""
     print("Running over-sampling posterior analysis...")
-    
-    # Configuration
-    N_epsilon = 20000
-    M0s = np.array([K, 1.1*K, 1.2*K, 1.5*K, 2*K, 5*K, 7.5*K, 10*K], dtype=int)
+
+    N_epsilon = 100000
+    M0s = np.array([K, 1.5*K, 2*K, 5*K, 10*K, 25*K], dtype=int)
     alpha_epsilon = 0.05
-    
-    # Generate samples for largest M0
+
     key, subkey = random.split(key)
     thetas = model.prior_generator(subkey, N_epsilon, np.max(M0s))
     key, subkey = random.split(key)
     zs = model.data_generator(subkey, thetas)
-    
-    # Calculate epsilon based on K components
+
     dists_perm, _, _, _ = optimal_index_distance(model, zs[:, :K], y_obs, M=K)
     epsilon = np.quantile(dists_perm, alpha_epsilon)
     print(f"Epsilon threshold: {epsilon}")
-    
+
     results = {
         'M0_values': [],
         'glob_posteriors': [],
         'loc_posteriors': [],
-        'acceptance_rates': []
+        'acceptance_rates': [],
     }
-    
-    # Process each M0 value
+
     for M0 in M0s:
         print(f"Processing M0 = {M0}")
-        
-        # Calculate distances for current M0
         dists_perm, ys_index, zs_index, _ = optimal_index_distance(
             model, zs[:, :M0], y_obs, M=M0
         )
-        
-        # Apply permutations and filter by epsilon
         thetas_perm = thetas.apply_permutation(zs_index)
         accepted = dists_perm < epsilon
         thetas_accepted = thetas_perm[accepted]
-        
+
         acceptance_rate = np.sum(accepted) / N_epsilon
         print(f"  Acceptance rate: {acceptance_rate:.2%}")
-        
-        # Store results
+
         results['M0_values'].append(M0)
         results['glob_posteriors'].append(thetas_accepted.glob[:, 0])
         results['loc_posteriors'].append(thetas_accepted.loc[:, 0, 0])
         results['acceptance_rates'].append(acceptance_rate)
-    
+
     return results, epsilon
 
 
-def create_posterior_plot(results, true_theta):
-    """Create posterior comparison plot."""
+# ── True conjugate posterior ──────────────────────────────────────────────────
+
+def _log_marginal_likelihood_sigma2(sigma2_grid, y_obs, model):
+    """Log p(y | sigma^2) after integrating out all mu_k analytically.
+
+    Model: mu_k ~ N(0, sigma_0^2),  X_{k,i} | mu_k, sigma^2 ~ N(mu_k, sigma^2).
+    Marginal per component: y_k ~ N(0, sigma^2 I + sigma_0^2 11^T).
+    """
+    K = model.K
+    n = model.n_obs
+    sigma_0_sq = model.sigma_0 ** 2
+    y = np.asarray(y_obs[0])  # (K, n_obs)
+
+    log_lik = np.zeros_like(sigma2_grid)
+    for k in range(K):
+        SS_k = np.sum(y[k] ** 2)
+        S_k = np.sum(y[k])
+        # det and quadratic form via Woodbury / matrix determinant lemma
+        log_lik += (
+            -n / 2 * np.log(sigma2_grid)
+            - 0.5 * np.log(1 + n * sigma_0_sq / sigma2_grid)
+            - 1 / (2 * sigma2_grid) * (
+                SS_k - sigma_0_sq * S_k ** 2 / (sigma2_grid + n * sigma_0_sq)
+            )
+        )
+    return log_lik
+
+
+def true_posterior_sigma2(model, y_obs, sigma2_grid):
+    """Marginal posterior density of sigma^2 on a grid (normalised)."""
+    alpha, beta = model.alpha, model.beta
+    log_prior = -(alpha + 1) * np.log(sigma2_grid) - beta / sigma2_grid
+    log_post = log_prior + _log_marginal_likelihood_sigma2(sigma2_grid, y_obs, model)
+    log_post -= np.max(log_post)
+    post = np.exp(log_post)
+    post /= np.trapezoid(post, sigma2_grid)
+    return post
+
+
+def true_posterior_mu1(model, y_obs, mu1_grid, n_sigma2=1000):
+    """Marginal posterior density of mu_1 by integrating over sigma^2."""
+    n = model.n_obs
+    sigma_0_sq = model.sigma_0 ** 2
+    y = np.asarray(y_obs[0])
+    S_1 = np.sum(y[0])
+
+    # sigma^2 grid — wide enough to cover the posterior mass
+    s2_grid = np.linspace(0.01, 30, n_sigma2)
+    post_s2 = true_posterior_sigma2(model, y_obs, s2_grid)
+    ds2 = s2_grid[1] - s2_grid[0]
+
+    post_mu1 = np.zeros_like(mu1_grid)
+    for i, s2 in enumerate(s2_grid):
+        v1 = 1.0 / (n / s2 + 1.0 / sigma_0_sq)
+        m1 = v1 * S_1 / s2
+        post_mu1 += post_s2[i] * norm.pdf(mu1_grid, loc=m1, scale=np.sqrt(v1))
+    post_mu1 *= ds2
+    # renormalise for numerical safety
+    post_mu1 /= np.trapezoid(post_mu1, mu1_grid)
+    return post_mu1
+
+
+# ── Plotting ─────────────────────────────────────────────────────────────────
+
+def create_posterior_plot(results, true_theta, model, y_obs=None):
     M0s = results['M0_values']
     colors = plt.cm.viridis(np.linspace(0, 1, len(M0s)))
-    
-    # Setup plot
+
     fig, axes = plt.subplots(1, 2, figsize=(10, 5))
-    fontsize = 12
-    titlesize = 15
-    
-    # Plot global parameter posteriors
+
+    # ── Global parameter (sigma^2) ───────────────────────────────────────
     for i, M0 in enumerate(M0s):
         glob_samples = results['glob_posteriors'][i]
         if len(glob_samples) > 0:
-            sns.kdeplot(glob_samples, ax=axes[0], color=colors[i], 
-                       label=f"M = {M0}")
-    
-    # Add prior for global parameter
-    prior_glob = invgamma(a=3, scale=5)
-    a_glob, b_glob = prior_glob.interval(0.999)
-    x_glob = np.linspace(a_glob, b_glob, 1000)
-    axes[0].plot(x_glob, prior_glob.pdf(x_glob), 
-                linestyle="--", color="grey", label="Prior")
-    # axes[0].axvline(true_theta.glob[0, 0], color='red', linestyle='-', 
-    #                linewidth=2, label=f"True: {true_theta.glob[0, 0]}")
-    
-    # axes[0].legend()
-    axes[0].set_ylabel("Density", fontsize=fontsize)
-    axes[0].set_xlabel("β", fontsize=fontsize)
-    axes[0].set_title("Global parameter", fontsize=titlesize)
-    axes[0].set_xlim(0, 10)
-    
-    # Plot local parameter posteriors
+            sns.kdeplot(glob_samples, ax=axes[0], color=colors[i], label=f"M = {M0}")
+
+    prior_glob = invgamma(a=model.alpha, scale=model.beta)
+    a_glob, b_glob = prior_glob.ppf(0.00), prior_glob.ppf(0.9)
+    x_glob = np.linspace(max(a_glob, 1e-3), b_glob, 1000)
+    axes[0].plot(x_glob, prior_glob.pdf(x_glob),
+                 linestyle="--", color="grey", label="Prior")
+
+    # True conjugate posterior
+    if y_obs is not None:
+        post_s2 = true_posterior_sigma2(model, y_obs, x_glob)
+        # axes[0].plot(x_glob, post_s2,
+        #              linestyle="-", color="black", linewidth=2, label="True posterior")
+
+    # axes[0].axvline(true_theta.glob[0, 0], color='red', linestyle='-',
+    #                 linewidth=1.5, alpha=0.7, label=f"True: {true_theta.glob[0, 0]:.1f}")
+    axes[0].legend(fontsize=8)
+    axes[0].set_ylabel("Density")
+    axes[0].set_xlabel(r"$\sigma^2$")
+    axes[0].set_title("Global parameter")
+    axes[0].set_xlim(0, b_glob)
+
+    # ── Local parameter (mu_1) ───────────────────────────────────────────
     for i, M0 in enumerate(M0s):
         loc_samples = results['loc_posteriors'][i]
         if len(loc_samples) > 0:
-            sns.kdeplot(loc_samples, ax=axes[1], color=colors[i], 
-                       label=f"M = {M0}")
-    
-    # Add prior for local parameter
-    prior_loc = norm(loc=0, scale=10)
+            sns.kdeplot(loc_samples, ax=axes[1], color=colors[i], label=f"M = {M0}")
+
+    prior_loc = norm(loc=0, scale=model.sigma_0)
     a_loc, b_loc = prior_loc.interval(0.999)
     x_loc = np.linspace(a_loc, b_loc, 1000)
-    axes[1].plot(x_loc, prior_loc.pdf(x_loc), 
-                linestyle="--", color="grey", label="Prior")
-    # axes[1].axvline(true_theta.loc[0, 0, 0], color='red', linestyle='-', 
-                #    linewidth=2, label=f"True: {true_theta.loc[0, 0, 0]}")
-    
-    axes[1].set_ylabel("")
-    axes[1].set_xlabel("μ₁", fontsize=fontsize)
-    axes[1].set_title("Local parameter", fontsize=titlesize)
+    axes[1].plot(x_loc, prior_loc.pdf(x_loc),
+                 linestyle="--", color="grey", label="Prior")
+
+    # True conjugate posterior
+    if y_obs is not None:
+        post_mu1 = true_posterior_mu1(model, y_obs, x_loc)
+        # axes[1].plot(x_loc, post_mu1,
+                    #  linestyle="-", color="black", linewidth=2, label="True posterior")
+
+    # axes[1].axvline(true_theta.loc[0, 0, 0], color='red', linestyle='-',
+    #                 linewidth=1.5, alpha=0.7, label=f"True: {true_theta.loc[0, 0, 0]:.1f}")
+    # axes[1].set_ylabel("")
+    axes[1].set_xlabel(r"$\mu_1$")
+    axes[1].set_title("Local parameter")
     axes[1].set_xlim(-10, 10)
-    
-    plt.tight_layout()
+
+    fig.tight_layout()
     return fig
 
 
-def save_results(results, true_theta, epsilon, K, seed, output_dir):
-    """Save results to pickle and create plots."""
-    # Create output directories
-    results_dir = output_dir  # Direct storage in output_dir
-    BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
-    figures_dir = os.path.join(BASE_DIR, "figures", "fig2")
+# ── Save / Load ──────────────────────────────────────────────────────────────
 
-    os.makedirs(results_dir, exist_ok=True)
-    os.makedirs(figures_dir, exist_ok=True)
-    
-    # Prepare data to pickle
+def save_results(results, true_theta, epsilon, model, y_obs, K, seed):
+    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+
     save_data = {
         'results': results,
         'true_theta': true_theta,
         'epsilon': epsilon,
+        'model': model,
+        'y_obs': y_obs,
         'K': K,
-        'seed': seed
+        'seed': seed,
     }
-    
-    # Save to pickle - directly in results_dir
-    pickle_path = os.path.join(results_dir, f"fig2_over_sampling_K_{K}_seed_{seed}.pkl")
-    with open(pickle_path, "wb") as f:
+    pkl = _pkl_path(K, seed)
+    with open(pkl, "wb") as f:
         pickle.dump(save_data, f)
-    print(f"Results saved to: {pickle_path}")
-    
-    # Create and save plots
-    fig = create_posterior_plot(results, true_theta)
-    
-    # Save plots
-    base_name = f"fig2_seed_{seed}"
-    fig.savefig(os.path.join(figures_dir, f"{base_name}.pdf"), 
-                dpi=300, bbox_inches='tight')
-    # fig.savefig(os.path.join(figures_dir, f"{base_name}.png"), 
-    #             dpi=300, bbox_inches='tight')
-    plt.close(fig)
-    
-    print(f"Figures saved to: {figures_dir}/{base_name}.*")
-    
-    return pickle_path
+    print(f"Results saved to: {pkl}")
+
+    fig = create_posterior_plot(results, true_theta, model, y_obs=y_obs)
+    fig_path = _fig_path(K, seed)
+    save_figure(fig, fig_path)
+    print(f"Figure saved to: {fig_path}")
 
 
-def rerun_from_pickle(pickle_path):
-    """Recreate plots from existing pickle results."""
-    print(f"Recreating plots from: {pickle_path}")
-    
-    # Load results
-    with open(pickle_path, "rb") as f:
+def replot_from_pickle(pkl_path):
+    print(f"Loading results from: {pkl_path}")
+    with open(pkl_path, "rb") as f:
         data = pickle.load(f)
-    
+
     results = data['results']
     true_theta = data['true_theta']
-    epsilon = data['epsilon']
     K = data['K']
     seed = data['seed']
-    
-    print("Loaded data:")
-    print(f"K={K}, seed={seed}, epsilon={epsilon}")
-    print("M0 values:", results['M0_values'])
-    print("Acceptance rates:", results['acceptance_rates'])
-    
-    # Create and show plot
-    fig = create_posterior_plot(results, true_theta)
-    
-    BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
-    figures_dir = os.path.join(BASE_DIR, "figures", "fig2")
 
-    base_name = f"fig2_seed_{seed}"
-    fig.savefig(os.path.join(figures_dir, f"{base_name}.pdf"), 
-                dpi=300, bbox_inches='tight')
-    # fig.savefig(os.path.join(figures_dir, f"{base_name}.png"), 
-    #             dpi=300, bbox_inches='tight')
-    plt.show()
-    plt.close(fig)
-    print("Figures saved to:",  os.path.join(figures_dir, f"{base_name}.*"))
+    # Rebuild model if not pickled (legacy pkl)
+    model = data.get('model')
+    if model is None:
+        model = GaussianWithNoSummaryStats(K=K, n_obs=100, sigma_0=10, alpha=2, beta=2)
+    y_obs = data.get('y_obs')
+
+    print(f"K={K}, seed={seed}, epsilon={data['epsilon']}")
+    print(f"M0 values: {results['M0_values']}")
+    print(f"Acceptance rates: {results['acceptance_rates']}")
+
+    fig = create_posterior_plot(results, true_theta, model, y_obs=y_obs)
+    fig_path = _fig_path(K, seed)
+    save_figure(fig, fig_path)
+    print(f"Figure saved to: {fig_path}")
 
 
+# ── CLI ──────────────────────────────────────────────────────────────────────
 
 def parse_arguments():
-    """Parse command line arguments."""
     parser = argparse.ArgumentParser(
-        description="Generate over-sampling posterior comparison plots"
+        description="Figure 2: Over-sampling posterior comparison"
     )
-    
-    parser.add_argument('--K', type=int, default=10,
-                       help='Number of components (default: 10)')
-    parser.add_argument('--K_outliers', type=int, default=0,
-                       help='Number of outlier components (default: 0)')
-    parser.add_argument('--seed', type=int, default=42,
-                       help='Random seed (default: 42)')
-    parser.add_argument('--output-dir', type=str, default="experiments/results/fig2",
-                       help='Output directory (default: experiments/results/fig2)')
-    parser.add_argument('--rerun', action='store_true',
-                       help='Force re-simulation even if cached results exist')
-    
+    parser.add_argument('--K', type=int, default=10)
+    parser.add_argument('--seed', type=int, default=42)
+    parser.add_argument('--rerun', type=str, default=None,
+                        help='Path to existing .pkl — replot without re-simulation')
+    parser.add_argument('--force', action='store_true',
+                        help='Force re-simulation even if cached results exist')
     return parser.parse_args()
 
 
 def main():
-    """Main execution function."""
     args = parse_arguments()
-    
+
     print("Figure 2: Over-sampling posterior comparison")
-    print(f"Parameters: K={args.K}, K_outliers={args.K_outliers}, seed={args.seed}")
-    
-    # Handle rerun case - force re-simulation
+    print(f"Parameters: K={args.K}, seed={args.seed}")
+
+    # Replot from given pickle
     if args.rerun:
-        print("Rerun mode: forcing new simulation...")
-        # Setup experiment and run new simulation
-        model, y_obs, true_theta, key = setup_experiment(
-            K=args.K, K_outliers=args.K_outliers, seed=args.seed
-        )
-        results, epsilon = run_over_sampling_posterior(key, model, y_obs, args.K)
-        pickle_path = save_results(results, true_theta, epsilon, args.K, args.seed, args.output_dir)
-        print("New simulation complete!")
-        print(f"Results: {pickle_path}")
+        replot_from_pickle(args.rerun)
         return
-    
-    # Check for existing results with this K and seed
-    pickle_path = os.path.join(args.output_dir, f"fig2_over_sampling_K_{args.K}_seed_{args.seed}.pkl")
-    
-    if os.path.exists(pickle_path):
-        print(f"Found existing results at {pickle_path}")
-        print("Generating plot from cached data...")
-        rerun_from_pickle(pickle_path)
+
+    # Check cache (skip if --force)
+    pkl = _pkl_path(args.K, args.seed)
+    if pkl.exists() and not args.force:
+        print(f"Found cached results: {pkl}")
+        replot_from_pickle(pkl)
         return
-    
-    # No existing results found, run new simulation
-    print("No existing results found, running new simulation...")
-    
-    # Setup experiment
-    model, y_obs, true_theta, key = setup_experiment(
-        K=args.K, K_outliers=args.K_outliers, seed=args.seed
-    )
-    
-    # Run analysis
+
+    # Run simulation
+    model, y_obs, true_theta, key = setup_experiment(K=args.K, seed=args.seed)
     results, epsilon = run_over_sampling_posterior(key, model, y_obs, args.K)
-    
-    # Save results and create plots
-    pickle_path = save_results(results, true_theta, epsilon, args.K, args.seed, args.output_dir)
-    
-    print("Analysis complete!")
-    print(f"Results: {pickle_path}")
+    save_results(results, true_theta, epsilon, model, y_obs, args.K, args.seed)
+    print("Done.")
 
 
 if __name__ == "__main__":

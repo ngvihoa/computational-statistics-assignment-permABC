@@ -7,14 +7,58 @@ a sequence of decreasing tolerance levels.
 """
 from typing import Tuple, Any, List, Dict, Optional
 from ..utils.functions import ess, resampling  # Fixed relative import
-from ..core.distances import optimal_index_distance  # Fixed relative import
-from ..core.moves import move_smc, move_smc_gibbs_blocks  # Fixed relative import
+from ..assignment import optimal_index_distance
+from ..assignment import dispatch as _assignment_dispatch
+from ..sampling import move_smc, move_smc_gibbs_blocks, calculate_overall_acceptance_rate
 import numpy as np
 from jax import random
 import time
 import matplotlib.pyplot as plt
 # Add your custom types here if needed
 Theta = Any  # Replace with actual Theta class if available
+
+
+def resolve_assignment_bools(try_identity=True, try_hilbert=False,
+                              try_sinkhorn=False, try_swaps=True,
+                              try_lsa=True):
+    """Build a cascade list from boolean flags.
+
+    The cascade defines the order of assignment strategies tried
+    progressively: identity → hilbert/sinkhorn → swap → lsa.
+
+    - ``try_identity``: reuse previous permutation (sigma_t) if distance < epsilon.
+    - ``try_hilbert``: Hilbert curve O(K log K) approximate assignment.
+    - ``try_sinkhorn``: Sinkhorn O(K² iters) approximate assignment.
+    - ``try_swaps``: pairwise swap refinement O(K²).
+    - ``try_lsa``: exact LSA O(K³) as final fallback.
+
+    Error if both ``try_hilbert`` and ``try_sinkhorn`` are True.
+
+    First iteration always uses LSA regardless of these flags
+    (handled by dispatch).
+
+    Returns
+    -------
+    cascade : list of str
+        Steps in order, e.g. ``["identity", "hilbert", "swap", "lsa"]``.
+        Empty list means no permutation (standard ABC).
+    """
+    if try_hilbert and try_sinkhorn:
+        raise ValueError("Cannot use both Hilbert and Sinkhorn simultaneously. "
+                         "Set try_hilbert=False or try_sinkhorn=False.")
+
+    cascade = []
+    if try_identity:
+        cascade.append("identity")
+    if try_hilbert:
+        cascade.append("hilbert")
+    if try_sinkhorn:
+        cascade.append("sinkhorn")
+    if try_swaps:
+        cascade.append("swap")
+    if try_lsa:
+        cascade.append("lsa")
+    return cascade
 
 
 
@@ -96,13 +140,11 @@ def init_perm_smc(
     y_obs: np.ndarray,
     verbose: int = 1,
     update_weight_distance: bool = True,
-    parallel: bool = False
+    parallel: bool = False,
+    cascade: Optional[List[str]] = None,
 ) -> Tuple[Theta, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, float, int]:
     """
     Initialize permutation-enhanced ABC-SMC algorithm.
-    
-    Sets up the initial particle population with optimal permutation matching
-    to resolve label switching issues from the start.
     
     Parameters
     ----------
@@ -120,6 +162,10 @@ def init_perm_smc(
         Whether to update model distance weights.
     parallel : bool, default=False
         Whether to use parallel LSA computation.
+    assignment : str or None
+        Assignment method: "lsa", "hilbert", None, or smart variants.
+    swap : bool
+        Apply swap refinement after assignment.
         
     Returns
     -------
@@ -163,12 +209,13 @@ def init_perm_smc(
     
     # Compute optimal permutation matching
     distance_values, ys_index, zs_index, n_lsa = optimal_index_distance(
-        zs=zs, 
-        y_obs=y_obs, 
-        model=model, 
-        verbose=verbose, 
-        epsilon=np.inf,  # Accept all particles initially
-        parallel=parallel
+        zs=zs,
+        y_obs=y_obs,
+        model=model,
+        verbose=verbose,
+        epsilon=np.inf,
+        parallel=parallel,
+        cascade=cascade,
     )
     
     # Update weights after permutation if requested
@@ -393,7 +440,7 @@ def abc_smc(
     })
     
     # Initialize diagnostics
-    initial_diagnostics = _compute_smc_diagnostics(thetas, n_particles)
+    initial_diagnostics = _compute_smc_diagnostics(thetas, n_particles, skip=(verbose < 1))
     results_data.update({
         'Unique_p': [initial_diagnostics['unique_part']], 
         'Unique_c': [initial_diagnostics['unique_comp']],
@@ -517,7 +564,7 @@ def abc_smc(
                 print(f"After weight update: {len(alive)} particles alive ({n_killed} killed)")
 
         # Compute diagnostics
-        diagnostics = _compute_smc_diagnostics(thetas, n_particles)
+        diagnostics = _compute_smc_diagnostics(thetas, n_particles, skip=(verbose < 1))
         
         # Display progress
         if verbose > 0:
@@ -607,106 +654,57 @@ def perm_abc_smc(
     stopping_accept_rate_local: Optional[float] = None,
     both_loc_glob: bool = False,
     stopping_epsilon_difference: float = 0.00,
-    parallel: bool = False
+    parallel: bool = False,
+    try_identity: bool = True,
+    try_hilbert: bool = False,
+    try_sinkhorn: bool = False,
+    try_swaps: bool = True,
+    try_lsa: bool = True,
 ) -> Dict[str, Any]:
     """
     Permutation-enhanced ABC-SMC algorithm.
-    
-    Implements ABC-SMC with optimal permutation matching at each iteration
-    to handle label switching and improve parameter inference in multi-component models.
-    
+
+    Implements ABC-SMC with optimal permutation matching at each iteration.
+    The assignment strategy is controlled by boolean flags that build a
+    progressive cascade: identity → hilbert/sinkhorn → swap → lsa.
+
     Parameters
     ----------
-    key : jax.random.PRNGKey
-        Random number generator key.
-    model : object
-        Statistical model with permutation support.
-    n_particles : int
-        Number of particles to maintain.
-    epsilon_target : float
-        Target tolerance level.
-    y_obs : numpy.ndarray
-        Observed data.
-    kernel : class
-        Kernel class for MCMC proposals.
-    alpha_epsilon : float, default=0.95
-        Quantile level for epsilon updates.
-    Final_iteration : int, default=0
-        Number of additional iterations after reaching target epsilon.
-    alpha_resample : float, default=0.5
-        ESS threshold for resampling.
-    num_blocks_gibbs : int, default=0
-        Number of blocks for Gibbs sampling.
-    update_weights_distance : bool, default=False
-        Whether to adaptively update distance weights.
-    verbose : int, default=1
-        Verbosity level.
-    N_sim_max : int, default=np.inf
-        Maximum number of simulations.
-    N_iteration_max : int, default=np.inf
-        Maximum number of iterations.
-    stopping_accept_rate : float, default=0.015
-        Minimum acceptance rate before stopping.
-    stopping_accept_rate_global : float, optional
-        Minimum global acceptance rate.
-    stopping_accept_rate_local : float, optional
-        Minimum local acceptance rate.
-    both_loc_glob : bool, default=False
-        Whether to update both local and global parameters in Gibbs.
-    stopping_epsilon_difference : float, default=0.001
-        Minimum epsilon change to continue.
-    parallel : bool, default=False
-        Whether to use parallel LSA computation.
-        
-    Returns
-    -------
-    results : dict
-        Dictionary containing algorithm results and diagnostics including:
-        - All standard ABC-SMC outputs
-        - 'Ys_index': Row assignment evolution
-        - 'Zs_index': Column assignment evolution  
-        - 'N_lsa': LSA problem counts
-        
+    try_identity : bool, default=True
+        Reuse previous permutation (sigma_t) if distance < epsilon.
+    try_hilbert : bool, default=False
+        Try Hilbert curve O(K log K) approximate assignment.
+    try_sinkhorn : bool, default=False
+        Try Sinkhorn O(K² iters) approximate assignment.
+        Cannot be True simultaneously with ``try_hilbert``.
+    try_swaps : bool, default=True
+        Try pairwise swap refinement O(K²).
+    try_lsa : bool, default=True
+        Exact LSA O(K³) as final fallback.
+    assignment : str, optional
+        Legacy API — explicit assignment string (overrides bools).
+    swap : bool, optional
+        Legacy API — explicit swap flag (overrides bools).
+
     Notes
     -----
-    This algorithm extends standard ABC-SMC with:
-    
-    1. **Optimal Initialization**: Uses permutation matching from the start
-    2. **Permutation-Aware Moves**: MCMC moves consider permutation optimization
-    3. **Smart Distance Computation**: Uses efficient LSA with smart acceptance
-    4. **Final Permutation**: Applies optimal permutation at algorithm end
-    
-    Key differences from standard ABC-SMC:
-    - Maintains permutation indices (ys_index, zs_index) throughout
-    - Uses optimal_index_distance() instead of standard distance computation
-    - Can apply final permutation to resolve remaining label switching
-    
-    Benefits:
-    - Better parameter recovery in mixture models
-    - Reduced label switching issues
-    - Improved posterior approximation quality
-    - More efficient exploration of permutation-invariant spaces
-    
-    Examples
-    --------
-    >>> from permabc.algorithms import perm_abc_smc
-    >>> from permabc.core import KernelRW
-    >>> 
-    >>> results = perm_abc_smc(
-    ...     key=rng_key, model=mixture_model, n_particles=1000,
-    ...     epsilon_target=0.1, y_obs=observations, kernel=KernelRW,
-    ...     verbose=1, parallel=True
-    ... )
-    >>> 
-    >>> final_thetas = results['Thetas'][-1]
-    >>> final_permutations = results['Zs_index'][-1]
+    Default (``try_identity=True, try_swaps=True, try_lsa=True``)
+    gives the cascade: identity → swap → lsa.
+
+    First iteration always uses exact LSA regardless of flags.
     """
     time_0 = time.time()
-    
+
+    # --- Build cascade from bools --------
+    cascade = resolve_assignment_bools(
+        try_identity, try_hilbert, try_sinkhorn,
+        try_swaps, try_lsa,
+    )
+
     # Initialize distance weights if requested
     if update_weights_distance:
         model.reset_weights_distance()
-    
+
     K = model.K
     if y_obs.ndim == 1: 
         y_obs = y_obs.reshape(1, -1)
@@ -724,22 +722,24 @@ def perm_abc_smc(
     
     # Initialize with permutation optimization
     thetas, zs, distance_values, ys_index, zs_index, weights, ess_val, n_lsa = init_perm_smc(
-        key, model, n_particles, y_obs, verbose=verbose, 
-        update_weight_distance=update_weights_distance, parallel=parallel
+        key, model, n_particles, y_obs, verbose=verbose,
+        update_weight_distance=update_weights_distance, parallel=parallel,
+        cascade=cascade,
     )
     alive = np.where(weights > 0.0)[0]
     
     # Initialize with consistent structure
     results_data = _init_smc_tracking()
     results_data.update({
-        'Thetas': [thetas], 'Zs': [zs], 'Weights': [weights], 
+        'Thetas': [thetas], 'Zs': [zs], 'Weights': [weights],
         'Ys_index': [ys_index], 'Zs_index': [zs_index],
-        'Ess': [ess_val], 'Dist': [distance_values], 
+        'Ess': [ess_val], 'Dist': [distance_values],
         'Nsim': [n_particles * model.K], 'Nlsa': [n_lsa], 'Time': [time.time() - time_0],
+        'Smart_stats': [{}],  # cascade acceptance stats per iteration
     })
 
     # Initialize diagnostics
-    initial_diagnostics = _compute_smc_diagnostics(thetas, n_particles)
+    initial_diagnostics = _compute_smc_diagnostics(thetas, n_particles, skip=(verbose < 1))
     results_data.update({
         'Unique_p': [initial_diagnostics['unique_part']], 
         'Unique_c': [initial_diagnostics['unique_comp']],
@@ -804,10 +804,11 @@ def perm_abc_smc(
         if num_blocks_gibbs == 0:
             # Standard permutation-aware move
             result = move_smc(
-                key=key_move, model=model, thetas=thetas[alive], zs=zs[alive], 
-                weights=weights[alive], ys_index=ys_index[alive], zs_index=zs_index[alive], 
-                epsilon=epsilon, y_obs=y_obs, distance_values=distance_values[alive], 
-                kernel=kernel, verbose=verbose, perm=True, parallel=parallel
+                key=key_move, model=model, thetas=thetas[alive], zs=zs[alive],
+                weights=weights[alive], ys_index=ys_index[alive], zs_index=zs_index[alive],
+                epsilon=epsilon, y_obs=y_obs, distance_values=distance_values[alive],
+                kernel=kernel, verbose=verbose, perm=True, parallel=parallel,
+                cascade=cascade,
             )
             
             # Update particles and permutations
@@ -826,11 +827,12 @@ def perm_abc_smc(
         else:
             # Block Gibbs with permutation awareness
             result = move_smc_gibbs_blocks(
-                key=key_move, model=model, thetas=thetas[alive], zs=zs[alive], 
-                weights=weights[alive], ys_index=ys_index[alive], zs_index=zs_index[alive], 
-                epsilon=epsilon, y_obs=y_obs, distance_values=distance_values[alive], 
-                kernel=kernel, H=num_blocks_gibbs, verbose=verbose, 
-                both_loc_glob=both_loc_glob, perm=True, parallel=parallel
+                key=key_move, model=model, thetas=thetas[alive], zs=zs[alive],
+                weights=weights[alive], ys_index=ys_index[alive], zs_index=zs_index[alive],
+                epsilon=epsilon, y_obs=y_obs, distance_values=distance_values[alive],
+                kernel=kernel, H=num_blocks_gibbs, verbose=verbose,
+                both_loc_glob=both_loc_glob, perm=True, parallel=parallel,
+                cascade=cascade,
             )
             
             # Update particles and permutations
@@ -848,9 +850,12 @@ def perm_abc_smc(
             acc_rate = calculate_overall_acceptance_rate(result)
             n_sim = result.n_simulations
 
+        # Capture cascade stats from the last smart assignment call
+        smart_stats_snapshot = dict(_assignment_dispatch.last_smart_stats)
+
         # Update distance weights with permuted data if requested
-        if update_weights_distance: 
-            if verbose > 1: 
+        if update_weights_distance:
+            if verbose > 1:
                 print("e) Update weights distance: ", end="")
             
             # Use permuted data for weight updates
@@ -859,9 +864,9 @@ def perm_abc_smc(
             
             # Recompute distances with updated weights
             distance_values[alive], ys_index[alive], zs_index[alive], n_lsa_update = optimal_index_distance(
-                zs=zs[alive], y_obs=y_obs, model=model, verbose=verbose, 
+                zs=zs[alive], y_obs=y_obs, model=model, verbose=verbose,
                 epsilon=epsilon, zs_index=zs_index[alive], ys_index=ys_index[alive],
-                parallel=parallel
+                parallel=parallel, cascade=cascade,
             )
             
             weights = update_weights(weights, distance_values, epsilon)
@@ -872,7 +877,7 @@ def perm_abc_smc(
                 print(f"After weight update: {len(alive)} particles alive ({n_killed} killed)")
 
         # Compute diagnostics
-        diagnostics = _compute_smc_diagnostics(thetas, n_particles)
+        diagnostics = _compute_smc_diagnostics(thetas, n_particles, skip=(verbose < 1))
         
         # Display progress
         if verbose > 0:
@@ -942,10 +947,11 @@ def perm_abc_smc(
             zs_index = np.repeat([np.arange(model.K)], n_particles, axis=0)
          # Store results using common function
         iteration_data = {
-            'Thetas': thetas, 'Zs': zs, 'Weights': weights, 
+            'Thetas': thetas, 'Zs': zs, 'Weights': weights,
             'Ys_index': ys_index, 'Zs_index': zs_index,
-            'Ess': ess_val, 'Epsilon': epsilon, 'Dist': distance_values, 
+            'Ess': ess_val, 'Epsilon': epsilon, 'Dist': distance_values,
             'Nsim': n_sim, 'Nlsa': n_lsa,
+            'Smart_stats': smart_stats_snapshot,
             'Acc_rate': acc_rate, 'Acc_rate_global': acc_rate_global, 'Acc_rate_local': acc_rate_local,
             'Time': time.time() - time_it
         }
@@ -1011,33 +1017,46 @@ def _update_smc_tracking(
             results_data[key] = results_data.get(key, []) + [value]
 
 
+_EMPTY_DIAGNOSTICS = {
+    'unique_part': 0.0, 'unique_comp': 0.0,
+    'unique_loc': 0.0, 'unique_glob': 0.0,
+}
+
+
 def _compute_smc_diagnostics(
     thetas: Theta,
-    n_particles: int
+    n_particles: int,
+    skip: bool = False,
 ) -> Dict[str, float]:
-    ...
     """
     Compute diagnostic metrics for SMC algorithms.
-    
+
     Parameters
     ----------
     thetas : Theta
         Parameter particles.
     n_particles : int
         Number of particles.
-        
+    skip : bool, default=False
+        If True, return zeros without computing (for verbose=0).
+
     Returns
     -------
     diagnostics : dict
         Diagnostic metrics.
     """
-    reshaped_thetas = thetas.reshape_2d()
-    
+    if skip:
+        return dict(_EMPTY_DIAGNOSTICS)
+
+    reshaped = np.asarray(thetas.reshape_2d())
+    loc_np = np.asarray(thetas.loc)
+    glob_np = np.asarray(thetas.glob)
+
     return {
-        'unique_part': len(np.unique(reshaped_thetas, axis=0)) / n_particles,
-        'unique_comp': len(np.unique(reshaped_thetas)) / np.prod(reshaped_thetas.shape),
-        'unique_loc': len(np.unique(thetas.loc)) / np.prod(thetas.loc.shape),
-        'unique_glob': len(np.unique(thetas.glob)) / np.prod(thetas.glob.shape)
+        'unique_part': len(np.unique(reshaped, axis=0)) / n_particles,
+        'unique_comp': len(np.unique(reshaped)) / np.prod(reshaped.shape),
+        'unique_loc': len(np.unique(loc_np)) / np.prod(loc_np.shape),
+        'unique_glob': len(np.unique(glob_np)) / np.prod(glob_np.shape)
     }
 
 
@@ -1086,10 +1105,12 @@ def _compile_smc_results(
     # Add permutation-specific results if requested
     if include_permutation:
         compiled_results.update({
-            "Ys_index": results_data['Ys_index'], 
-            "Zs_index": results_data['Zs_index'], 
-            "N_lsa": results_data['Nlsa']
+            "Ys_index": results_data['Ys_index'],
+            "Zs_index": results_data['Zs_index'],
+            "N_lsa": results_data['Nlsa'],
         })
+        if 'Smart_stats' in results_data:
+            compiled_results["Smart_stats"] = results_data['Smart_stats']
     
     return compiled_results
 

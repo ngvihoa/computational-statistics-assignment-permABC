@@ -8,22 +8,46 @@ __version__ = "0.1.0"
 __author__ = "Antoine Luciano"
 __email__ = "luciano@ceremade.dauphine.fr"
 
-# Import main algorithms
+# Import main algorithms.
+# Some algorithms depend on optional compiled deps (e.g. numba), which may fail
+# under certain numpy/jax environments. Keep those imports optional.
+abc_smc = None
+perm_abc_smc = None
+abc_pmc = None
+perm_abc_smc_os = None
+perm_abc_smc_um = None
+abc_vanilla = None
+perm_abc_vanilla = None
+
 try:
-    from .algorithms.smc import perm_abc_smc, abc_smc
-    from .algorithms.pmc import abc_pmc  
+    from .algorithms.smc import perm_abc_smc, abc_smc, resolve_assignment_bools
+except Exception:  # pragma: no cover
+    pass
+
+try:
+    from .algorithms.pmc import abc_pmc
+except Exception:  # pragma: no cover
+    abc_pmc = None
+
+try:
     from .algorithms.over_sampling import perm_abc_smc_os
+except Exception:  # pragma: no cover
+    perm_abc_smc_os = None
+
+try:
     from .algorithms.under_matching import perm_abc_smc_um
+except Exception:  # pragma: no cover
+    perm_abc_smc_um = None
+
+try:
     from .algorithms.vanilla import abc_vanilla, perm_abc_vanilla
-except ImportError:
-    # Handle case where algorithms are not yet available
+except Exception:  # pragma: no cover
     pass
 
 # Import core components
 try:
-    from .core.distances import optimal_index_distance
-    from .core.kernels import KernelTruncatedRW, KernelRW
-    from .core.moves import move_smc
+    from .assignment import optimal_index_distance
+    from .sampling import KernelTruncatedRW, KernelRW, move_smc
 except ImportError:
     # Handle case where core modules are not yet available
     pass
@@ -39,7 +63,7 @@ except ImportError:
 __all__ = [
     # Algorithms
     'perm_abc_smc',
-    'abc_smc', 
+    'abc_smc',
     'abc_pmc',
     'perm_abc_smc_os',
     'perm_abc_smc_um',

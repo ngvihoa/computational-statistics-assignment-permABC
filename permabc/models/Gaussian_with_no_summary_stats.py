@@ -78,59 +78,28 @@ class GaussianWithNoSummaryStats(ModelBase):
         """
         Generate samples from the prior distribution.
         
-        Samples component means from Normal distribution and global variance
-        from InverseGamma distribution.
-        
-        Parameters
-        ----------
-        key : jax.random.PRNGKey
-            Random number generator key.
-        n_particles : int
-            Number of particles to generate.
-        n_silos : int, default=0
-            Number of components (if 0, defaults to K).
-            
-        Returns
-        -------
-        Theta
-            Parameter samples with:
-            - loc: Component means μ_k of shape (n_particles, n_silos, 1)
-            - glob: Global variance σ² of shape (n_particles, 1)
+        Uses NumPy random for sampling to avoid JAX recompilation
+        when called with varying n_particles across SMC iterations.
         """
         if n_silos == 0:
             n_silos = self.K
-            
-        key, key_mu, key_sigma = random.split(key, 3)
 
-        # Sample component means: μ_k ~ Normal(μ₀, σ₀²)
-        mus = random.normal(key_mu, shape=(n_particles, n_silos, 1)) * self.sigma_0 + self.mu_0
+        rng = np.random.default_rng(int(key[0]))
 
-        # Sample global variance: σ² ~ InverseGamma(α, β)
-        # Note: JAX gamma samples from Gamma(α, 1), so we scale by β
-        sigma2 = self.beta / random.gamma(key_sigma, self.alpha, shape=(n_particles, 1))
+        mus = rng.standard_normal((n_particles, n_silos, 1)) * self.sigma_0 + self.mu_0
+
+        sigma2 = 1.0 / rng.gamma(self.alpha, scale=1.0 / self.beta, size=(n_particles, 1))
         
-        return Theta(loc=jnp.array(mus), glob=jnp.array(sigma2))
+        return Theta(loc=mus, glob=sigma2)
 
     def prior_logpdf(self, thetas):
         """
         Compute log probability density of the prior distribution.
-        
-        Parameters
-        ----------
-        thetas : Theta
-            Parameter values to evaluate.
-            
-        Returns
-        -------
-        np.ndarray
-            Log probability densities for each particle.
         """
-        # Log PDF for component means: sum over all components
-        log_pdf_mu = norm.logpdf(thetas.loc, loc=self.mu_0, scale=self.sigma_0)
-        log_pdf_mu_sum = jnp.sum(log_pdf_mu, axis=(1, 2))
+        log_pdf_mu = norm.logpdf(np.asarray(thetas.loc), loc=self.mu_0, scale=self.sigma_0)
+        log_pdf_mu_sum = np.sum(log_pdf_mu, axis=(1, 2))
         
-        # Log PDF for global variance
-        log_pdf_sigma2 = invgamma.logpdf(thetas.glob, a=self.alpha, scale=self.beta)
+        log_pdf_sigma2 = invgamma.logpdf(np.asarray(thetas.glob), a=self.alpha, scale=self.beta)
         return log_pdf_mu_sum + log_pdf_sigma2.reshape(-1)
 
     def data_generator(self, key, thetas):
@@ -141,31 +110,20 @@ class GaussianWithNoSummaryStats(ModelBase):
         The observations are sorted within each component to make them
         permutation-invariant.
         
-        Parameters
-        ----------
-        key : jax.random.PRNGKey
-            Random number generator key.
-        thetas : Theta
-            Parameter values for simulation.
-            
-        Returns
-        -------
-        np.ndarray
-            Simulated data of shape (n_particles, n_silos, n_obs).
-            Data is sorted within each component.
+        Uses NumPy for random generation and sorting to avoid JAX
+        JIT recompilation when particle count varies across SMC iterations.
         """
         n_particles = thetas.loc.shape[0]
         n_silos = thetas.loc.shape[1]
 
-        # Extract parameters
-        mus = thetas.loc  # Component means
-        sigmas = jnp.sqrt(thetas.glob)[:, None, :]  # Standard deviations (broadcast to components)
+        mus = np.asarray(thetas.loc)
+        sigmas = np.sqrt(np.asarray(thetas.glob))[:, None, :]
 
-        # Generate random observations
-        key, key_data = random.split(key)
-        zs = random.normal(key_data, shape=(n_particles, n_silos, self.n_obs)) * sigmas + mus
+        rng = np.random.default_rng(int(key[0]))
+        zs = rng.standard_normal((n_particles, n_silos, self.n_obs)) * sigmas + mus
 
-        return np.array(self.summary(zs))
+        zs.sort(axis=2)
+        return zs
 
     def summary(self, z):
         """

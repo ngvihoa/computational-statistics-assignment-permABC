@@ -1,0 +1,108 @@
+\documentclass[10.5pt]{article}
+\usepackage[a4paper,margin=1in,onehalfspacing]{geometry}
+\usepackage{lmodern}
+\usepackage{graphicx}
+\usepackage{amsmath,amssymb,amsthm}
+% \usepackage{setspace}
+    % \setstretch{1.5}
+\usepackage{xcolor}
+\usepackage{hyperref}
+% Espacement vertical supplémentaire
+\usepackage{parskip}
+
+\date{\today}
+
+% Robin Ryder
+\def\rr#1{\textcolor{blue}{#1}} 
+% Xian
+\def\x#1{\textcolor{red}{#1}}
+% Antoine
+\def\al#1{\textcolor{orange}{#1}}
+
+
+\title{Reviews for \emph{Permutations accelerate ABC}}
+\author{Paul Fearnhead and 3 anonymous reviewers}
+\date{October 17, 2025}
+% \institution{Biometrika\\ \texttt{editor@biometrikatrust.org}} 
+
+
+\begin{document}
+\maketitle
+\section*{Editior's letter}
+Dear Mr. Luciano, 
+
+Your paper has been read by three reviewers and an Associate Editor. Their reports on your paper are attached. All readers show interest in your work, but overall there is not sufficient enthusiasm for its suitability for Bioemtrika. It has a nice simple idea that does appear to improve ABC, but the concerns are that the novelty and importance of this is a bit more limited than would be expected at Biometrika. It is a good paper, and I would guess it would be viewed postively by a strong but more specialist journal, particularly if improved in lines with some of the comments.
+
+However, in light of the comments, and after some reflection, I have decided to reject the paper. I am sorry to write negatively on this occasion, but wish you luck in publishing the paper elsewhere. 
+
+Thank you for your interest in Biometrika. 
+With best regards, 
+
+\begin{flushright}
+Paul Fearnhead \\
+Editor, \\
+Biometrika\\ 
+\texttt{editor@biometrikatrust.org}
+\end{flushright}
+
+
+\section*{Referee 1: Comments to the Author}
+
+This paper presents an interesting new approach for ABC that exploits exchangeability (conditional on some global parameters) of a dataset/model.  It does this by comparing all the permutations of the simulated data to the observed data, taking the permutation that minimises this distance.  This is clearly a much more efficient way to compare simulated to observed data in such settings (as the authors demonstrate in some toy examples).  The authors demonstrate that their new method permABC is equivalent to standard ABC but with different tolerances.  Thus all the theory developed for ABC carries over to permABC. 
+
+Although I enjoyed the new method and paper generally, I feel there is a fundamental flaw with the "motivating example" in the paper (Section 3.5).  The authors consider fitting a deterministic model (set of ODEs) to some Covid-19 data with ABC (if I understand correctly).  The problem with using ABC on deterministic models is if your epsilon is reduced far enough, then the "posterior" you get will simply converge onto a point mass at the parameter value that minimises the distance to the observed data (assuming a unique minimiser).  Thus the "posterior" that comes out is more or less meaningless for any value of epsilon.  Such issues are discussed, for example, in this paper:  \url{https://royalsocietypublishing.org/doi/10.1098/rsos.191315}. \al{Vrai. Mais dans nos implémentations on rajoute un bruit logNormal aux trajectoires. Malheureusement, j'ai oublié de le mentionner dans le papier...}
+
+This may also explain why the authors could consider such a high dimensional problem.  Dealing with stochastic models is much more challenging, since "good" proposals are often rejected due to randomness and the requirement for a stringent matching condition.  This problem is only exacerbated in higher dimensions (there are several paper discussing this problem).
+
+Since this example motivated the developed methodology, as admitted by the authors in the paper, and is a central part of the paper, it makes it difficult to judge the overall quality of the method. 
+
+As another less major comment, it would be good to know why the authors did not just consider the standard approach in SMC ABC, which is to consider a decreasing set of epsilons.  I realise the proposed sequences are novel and interesting, but if a decreasing sequence of epsilons can be implemented then there should really be a comparison, since also the standard sequence avoids some choices that must be made in the oversampling and under-matching approaches proposed by the authors.  If it can't be implemented, then there needs to be a compelling reason why. \al{Car l'Over Sampling et l'Under Matching sont plus rapides?}
+
+
+\section*{Referee 2: Comments to the Author}
+
+This article was a nice read, as the authors dealt with a specific scenario (hierarchical models) in the growing area of likelihood-free inference (LFI) scheme. It is well-written and carefully addresses the technical details. 
+
+The paper concentrates only one methodology of LFI, specifically Approximate Bayesian Computation (ABC) for this task. They mainly try to solve the problems on the previous attempt using ABC-Gibbs approach by assuming exchangeability among the nuisance parameters in each compartments. This assumption lets them choose a different permutation of the (nuisance parameter, data) which aligns to the observed datasets better, making computation more efficient. This is a novel twist in the story and I wonder whether this can be applied in any other domains of computational statistics? 
+
+In essence this provides a new approximate posterior, but which they were able to relate to approximate posterior provided by standard ABC and shows under some assumptions it also contracts if the original ABC posterior contracts. Indeed the theory available for ABC posterior contraction assumes extraordinarily strong conditions (almost unverifiable for LFI models), which will cause trouble for this approach in long term too. Given this Biometrika, I am happy with the amount of theoretical justification provided. 
+
+In my view, the second novelty comes through the modified SMC proposed for permABC, including oversampling, under matching, and modified kernels. Clearly this can be broadly adapted to other areas of SMC approaches in LFI. Some commentary about their wider applicability would be nice. 
+
+To justify the proposed approach, they perform two simulated examples where likelihood is available and studies can be done rigorously. They mainly study the behaviour of the approach, verifying the theoretical findings and commentaries beforehand. But in this simple Gaussian example, they only study their methodology with standard ABC (why PMC and also SMC?) and ABC-Gibbs. I find this is too little to show the strength of the method given the field of LFI has exploded in recent past and lot of new methodologies been proposed. At least the comparison should be done with amortised posterior (via Generative NNs) approaches and the generalised Bayesian approaches for LFI. Both of which are potent methods to deal high-dimensional LFI problems and even the second approach can utilise all the existing MCMC techniques available for hierarchical models. All these methods are approximate similar to ABC, so should be compared via simulations studies. 
+
+I believe the breadth of simulations study, via more examples (at least 3-5, including some LFI ones and not only for models with likelihood available), compared with with those other more promising methods is necessary for Biometrika. 
+
+Similarly, the real data example illustrates the idea well enough, but it does not pushes the method to the limit. This could be easily achieved by considering more complicated epidemics models for each compartments with more parameters, even for the considered dataset. The real data section deserves much more work, pushing the method proposed to a ‘real’ test case. 
+
+\section*{Referee: 3 Comments to the Author}
+
+This paper proposes a new ABC algorithm for parametric inference of hierarchical models where observations are grouped into exchangeable compartments. The novelty is two-fold. First it introduces a permutation-based distance defined as the minimal distance between the observed and simulated compartments over indices permutations so to exploit the exchangeability structure. Second, to improve the acceptance probability in ABC, it proposes two extensions of ABC-SMC, the over-sampling (permABC-OS), which simulates more compartments than are present in the data, and under-matching, which relaxes the matching criterion by retaining only the best $L$ matches where $L<K$. The paper is clearly written, and the methodology has potential to enhance ABC for hierarchical and exchangeable models. However, the paper needs some further clarification on the methodology, some further theoretical justification, and additional numerical comparison.
+
+\begin{enumerate}
+    \item The proposed distance (3) is closely related to the Wasserstein distance in Bernton et al. 2019, but the paper does not discuss their comparisons, only briefly mentioning the latter in pg5 paragraph 2. There is an incorrect statement in line 17 that the Wasserstein distance can not be used in multivariate case -- the Hilbert distance can be used to sort the permutations as illustrated in Bernton et al. 2019. For example, it would be helpful to compare their computational complexity. The permutationmatching algorithm used here has complexity O(Kˆ3), while the Hilbert distance sorting algorithm in Bernton et al 2019 achieves the complexity Klog(K). Can the Hilbert distance sorting algorithm be applied here and how does it compare with the algorithm here?
+    \item Theorem 1 shows that permABC is consistent whenever standard ABC is consistent as $\varepsilon \to 0$ with fixed data size n. While it is good to have this guarantee, it is of limited practical relevance, as in most applications $\varepsilon$ cannot be reduced to zero for finited n. It would be more interesting to consider the asymptotic regime involving $n \to \infty$ with fixed $\varepsilon$, as assumed in permABC-OS, or the joint limits $n \to \infty$ and $\varepsilon \to 0$ at appropriate rates.Another property of interest is whether the permABC posterior satisfies the Bayesian concentration as established in Bernton et al 2019 for the Wasserstein distance, which would substantially strengthen the theoretical contribution.
+    \item  The assumption $\varepsilon < \varepsilon^{\star}$ may be difficult to meet in practice, since $\varepsilon^{\star}$ can be very small if two components of y are close in value.
+    \item If I understand correctly, the permABC-OS is performed as follows: First choose a small enough value for $\varepsilon$ so that the ABC posterior $\pi_{\varepsilon}(\theta\mid \boldsymbol{y})$ is close to the true posterior; then initialize the bridging proposals with $M_0$ large enough to ensure a reasonable initial acceptance rate, and then decreases M to K, as illustrated in Figure 2. However in the left plot of Figure 2, the prior appears more concentrated than the ABC posterior ($K=10$) which is strange. Is this because $\varepsilon$ is not small enough or that in the experiment setting, the prior is more concentrated than the true posterior? This needs clarification because the intuition is that larger M allows more acceptance so yields approximate posterior that is more diffused, whereas the opposite pattern seems to appear.
+    \item To make the above point concrete, consider the locations model $\mu_k \sim N(\beta, 1)$ and $y_k \sim N(\mu_k, 1)$, $k = 1, \dots, K$, and $d(y, z)$ is the Euclidean distance between the empirical means of observed and simulated compartments. Furthermore consider the extreme case that for each compartment, the number of data points $n = \infty$. Then $\beta$ is the only unknown parameter, and the problem degenerates to estimating the normal mean with iid $\mu_1, \dots, \mu_K$. In such a setting, would the same pattern as in Figure 2—where the prior of $\beta$ appears more concentrated than the ABC posterior and the approximate posterior with larger M is closer to the prior —still occur?
+    \item It would be clearer to use a toy model with closed-form posterior solutions to illustrate how the algorithm behaves for different $M$ and to relate the results more explicitly to the Wasserstein ABC framework of Bernton et al. (2019). For example, in a normal–normal model with Gaussian acceptance kernel, the ABC posterior has a known closed form. One question that can be discussed is whether the effect of M is different in permABC than in the basic rejection ABC– it is known that for rejection ABC, increasing the number $M$ of simulations still yields sample from $\pi_K$ (Bornn et al 2017).
+    \item A large enough $M_0$ is crucial for permABC-OS, as noted by the authors. My understanding of what Appendix C.2 suggests is that $M_0$ should be chosen so that the resulting $\varepsilon$ (page 25 line 31) achieves a small target tolerance $\varepsilon^{\star}$; if this is infeasible within the simulation budget, the largest $M_0$ allowed by the budget is used. If the latter is the case, does it mean permABC-OS would not work well? Here it only mentions $\boldsymbol{\theta}$ is simulated from the prior. Would it help to simulate $\boldsymbol{\theta}$ from some importance proposal, e.g. when the posterior is substantially different from the prior?
+    \item Since the permutation distance is closely related to the Wasserstein distance, some numerical studies to comparing the two distances would be of strong interest, helping readers to understand the advantages the proposed approach offers.
+\end{enumerate}
+
+\section*{Associate Editor Comments to the Author}
+
+I have received 3 reviews for the manuscript. All three agree that the methodology has merit and the paper is well-written, but all also raise some issues about the work. 
+
+One reviewer criticises the motivation for the approach, arguing that ABC is often inappropriate for deterministic models. They also suggest that the methodology could be simplified, leaning on standard approaches in SMC-ABC. 
+
+The second reviewer is more positive, highlighting the novelty of the methodology (in particular the SMC scheme used).  But they do highlight that significantly more numerical comparisons would be needed to properly judge its merit. 
+
+The final reviewer suggests that the theoretical results could be stronger, and also criticises the scope of  numerical comparisons.  In particular they highlight that the approach is quite closely related to Wasserstein ABC, and suggest that comparing to this approach, both numerically and theoretically, would allow better assessment of its worth. 
+
+\section*{Editor}
+
+Could you extend Lemma 1 and Theorem 1 to the case where you have exact matches, and define $\varepsilon^{\star}$ to half the minimum distance between distinct observations? Whilst the cardinality of matches closer than $\varepsilon^{\star}$ will no longer be one, would it be constant -- and thus the same argument behind Theorem 1 would apply?
+
+
+\end{document}

@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3:*)",
+      "Bash(head -3 /Users/antoineluciano/Documents/Recherche/permABC/experiments/results/assignment_benchmark_notebook/*.csv)",
+      "Bash(python:*)",
+      "Bash(conda env:*)",
+      "Bash(PYENV_VERSION=permabc pyenv exec python -m pytest tests/ -v 2>&1)",
+      "Bash(PYENV_VERSION=permabc pyenv exec python -c \":*)",
+      "Bash(PYENV_VERSION=permabc pyenv exec python experiments/scripts/figures/fig4bis_performance_comparison_without_osum.py --K 20 --K_outliers 4 --seed 42 2>&1)",
+      "Bash(ls:*)",
+      "Bash(PYENV_VERSION=permabc pyenv exec python experiments/scripts/figures/fig10_outlier_influence.py --K 20 --seed 42 --osum 2>&1)",
+      "Bash(PYENV_VERSION=permabc pyenv exec pytest tests/ -p no:cov -v)",
+      "Bash(PYENV_VERSION=permabc pyenv exec python -c \"from permabc.core.distances import optimal_index_distance, do_swap, _HAS_NUMBA, _HAS_CGAL; print\\('OK'\\)\")",
+      "Bash(ssh ceremade-cluster:*)"
+    ]
+  }
+}

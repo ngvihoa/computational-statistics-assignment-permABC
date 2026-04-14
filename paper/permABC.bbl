@@ -1,0 +1,176 @@
+\begin{thebibliography}{25}
+\expandafter\ifx\csname natexlab\endcsname\relax\def\natexlab#1{#1}\fi
+
+\bibitem[{Beaumont et~al.(2009)Beaumont, Cornuet, Marin \&
+  Robert}]{beaumontAdaptiveApproximateBayesian2009b}
+\textsc{Beaumont, M.~A.}, \textsc{Cornuet, J.-M.}, \textsc{Marin, J.-M.} \&
+  \textsc{Robert, C.~P.} (2009).
+\newblock Adaptive approximate {{Bayesian}} computation.
+\newblock \textit{Biometrika} \textbf{96}, 983--990.
+
+\bibitem[{Bernton et~al.(2019)Bernton, Jacob, Gerber \&
+  Robert}]{bernton2019approximate}
+\textsc{Bernton, E.}, \textsc{Jacob, P.~E.}, \textsc{Gerber, M.} \&
+  \textsc{Robert, C.~P.} (2019).
+\newblock Approximate {{Bayesian}} computation with the {{Wasserstein}}
+  distance.
+\newblock \textit{Journal of the Royal Statistical Society Series B:
+  Statistical Methodology} \textbf{81}, 235--269.
+
+\bibitem[{Bornn et~al.(2017)Bornn, Pillai, Smith \& Woodard}]{bornn2017use}
+\textsc{Bornn, L.}, \textsc{Pillai, N.~S.}, \textsc{Smith, A.} \&
+  \textsc{Woodard, D.} (2017).
+\newblock The use of a single pseudo-sample in approximate {Bayesian}
+  computation.
+\newblock \textit{Statistics and Computing} \textbf{27}, 583--590.
+
+\bibitem[{Chopin et~al.(2020)Chopin, Papaspiliopoulos
+  et~al.}]{chopin2020introduction}
+\textsc{Chopin, N.}, \textsc{Papaspiliopoulos, O.} et~al. (2020).
+\newblock \textit{An introduction to sequential Monte Carlo}, vol.~4.
+\newblock Springer.
+
+\bibitem[{Clart{\'e} et~al.(2021)Clart{\'e}, Robert, Ryder \&
+  Stoehr}]{clarte2021componentwise}
+\textsc{Clart{\'e}, G.}, \textsc{Robert, C.~P.}, \textsc{Ryder, R.~J.} \&
+  \textsc{Stoehr, J.} (2021).
+\newblock Componentwise approximate bayesian computation via gibbs-like steps.
+\newblock \textit{Biometrika} \textbf{108}, 591--607.
+
+\bibitem[{Crouse(2016)}]{crouseImplementing2DRectangular2016a}
+\textsc{Crouse, D.~F.} (2016).
+\newblock On implementing {{2D}} rectangular assignment algorithms.
+\newblock \textit{{IEEE} Transactions on Aerospace and Electronic Systems}
+  \textbf{52}, 1679--1696.
+
+\bibitem[{Del~Moral et~al.(2006)Del~Moral, Doucet \&
+  Jasra}]{delmoralSequentialMonteCarlo2006a}
+\textsc{Del~Moral, P.}, \textsc{Doucet, A.} \& \textsc{Jasra, A.} (2006).
+\newblock Sequential {{Monte Carlo Samplers}}.
+\newblock \textit{Journal of the Royal Statistical Society Series B:
+  Statistical Methodology} \textbf{68}, 411--436.
+
+\bibitem[{Del~Moral et~al.(2012)Del~Moral, Doucet \&
+  Jasra}]{delmoralAdaptiveSequentialMonte2012}
+\textsc{Del~Moral, P.}, \textsc{Doucet, A.} \& \textsc{Jasra, A.} (2012).
+\newblock An adaptive sequential {{Monte Carlo}} method for approximate
+  {{Bayesian}} computation.
+\newblock \textit{Statistics and Computing} \textbf{22}, 1009--1020.
+
+\bibitem[{Fearnhead(2018)}]{fearnhead2018abc}
+\textsc{Fearnhead, P.} (2018).
+\newblock Asymptotics of abc.
+\newblock In \textit{Handbook of Approximate Bayesian Computation}. Chapman and
+  Hall/CRC, pp. 269--288.
+
+\bibitem[{Fearnhead \&
+  Prangle(2012)}]{fearnheadConstructingSummaryStatistics2012}
+\textsc{Fearnhead, P.} \& \textsc{Prangle, D.} (2012).
+\newblock Constructing {{Summary Statistics}} for {{Approximate Bayesian
+  Computation}}: {{Semi-Automatic Approximate Bayesian Computation}}.
+\newblock \textit{Journal of the Royal Statistical Society Series B:
+  Statistical Methodology} \textbf{74}, 419--474.
+
+\bibitem[{Holden et~al.(2018)Holden, Edwards, Hensman \&
+  Wilkinson}]{holden2018abc}
+\textsc{Holden, P.~B.}, \textsc{Edwards, N.~R.}, \textsc{Hensman, J.} \&
+  \textsc{Wilkinson, R.~D.} (2018).
+\newblock Abc for climate: dealing with expensive simulators.
+\newblock In \textit{Handbook of approximate Bayesian computation}. Chapman and
+  Hall/CRC, pp. 569--595.
+
+\bibitem[{Jonker \& Volgenant(1987)}]{jonker1987shortest}
+\textsc{Jonker, R.} \& \textsc{Volgenant, A.} (1987).
+\newblock A shortest augmenting path algorithm for dense and sparse linear
+  assignment problems.
+\newblock \textit{Computing} \textbf{38}, 325--340.
+
+\bibitem[{Marin et~al.(2012)Marin, Pudlo, Robert \&
+  Ryder}]{marinApproximateBayesianComputational2012a}
+\textsc{Marin, J.-M.}, \textsc{Pudlo, P.}, \textsc{Robert, C.~P.} \&
+  \textsc{Ryder, R.~J.} (2012).
+\newblock Approximate {{Bayesian}} computational methods.
+\newblock \textit{Statistics and Computing} \textbf{22}, 1167--1180.
+
+\bibitem[{Marjoram et~al.(2003)Marjoram, Molitor, Plagnol \&
+  Tavar{\'e}}]{marjoramMarkovChainMonte2003a}
+\textsc{Marjoram, P.}, \textsc{Molitor, J.}, \textsc{Plagnol, V.} \&
+  \textsc{Tavar{\'e}, S.} (2003).
+\newblock Markov chain {{Monte Carlo}} without likelihoods.
+\newblock \textit{Proceedings of the National Academy of Sciences}
+  \textbf{100}, 15324--15328.
+
+\bibitem[{Picchini \& Tamborrino(2024)}]{picchini2024guided}
+\textsc{Picchini, U.} \& \textsc{Tamborrino, M.} (2024).
+\newblock Guided sequential abc schemes for intractable bayesian models.
+\newblock \textit{Bayesian Analysis} \textbf{1}, 1--32.
+
+\bibitem[{Piccioni et~al.(2022)Piccioni, Casenave, Baragatti, Cloez \&
+  Vin{\c{c}}on-Leite}]{piccioni2022calibration}
+\textsc{Piccioni, F.}, \textsc{Casenave, C.}, \textsc{Baragatti, M.},
+  \textsc{Cloez, B.} \& \textsc{Vin{\c{c}}on-Leite, B.} (2022).
+\newblock Calibration of a complex hydro-ecological model through approximate
+  bayesian computation and random forest combined with sensitivity analysis.
+\newblock \textit{Ecological Informatics} \textbf{71}, 101764.
+
+\bibitem[{Prangle(2017)}]{prangle2017adapting}
+\textsc{Prangle, D.} (2017).
+\newblock Adapting the abc distance function.
+\newblock \textit{Bayesian Analysis} \textbf{12}, 289--309.
+
+\bibitem[{Pritchard et~al.(1999)Pritchard, Seielstad, {Perez-Lezaun} \&
+  Feldman}]{pritchardPopulationGrowthHuman1999a}
+\textsc{Pritchard, J.~K.}, \textsc{Seielstad, M.~T.}, \textsc{{Perez-Lezaun},
+  A.} \& \textsc{Feldman, M.~W.} (1999).
+\newblock Population growth of human {{Y}} chromosomes: A study of {{Y}}
+  chromosome microsatellites.
+\newblock \textit{Molecular Biology and Evolution} \textbf{16}, 1791--1798.
+
+\bibitem[{Rodrigues et~al.(2020)Rodrigues, Nott \&
+  Sisson}]{rodrigues2020likelihood}
+\textsc{Rodrigues, G.}, \textsc{Nott, D.~J.} \& \textsc{Sisson, S.~A.} (2020).
+\newblock Likelihood-free approximate gibbs sampling.
+\newblock \textit{Statistics and computing} \textbf{30}, 1057--1073.
+
+\bibitem[{{Sant\'e publique France}(2020)}]{DataCovid}
+\textsc{{Sant\'e publique France}} (2020).
+\newblock Donn\'ees hospitali\`eres relatives \`a l'\'epid\'emie de {COVID-19}
+  ({SIVIC}).
+
+\bibitem[{Sisson et~al.(2018)Sisson, Fan \&
+  Beaumont}]{sissonHandbookApproximateBayesian2018}
+\textsc{Sisson, S.~A.}, \textsc{Fan, Y.} \& \textsc{Beaumont, M.~A.}, eds.
+  (2018).
+\newblock \textit{Handbook of {{Approximate Bayesian Computation}}}.
+\newblock {Chapman and Hall/CRC}, 1st ed.
+
+\bibitem[{Sisson et~al.(2007)Sisson, Fan \& Tanaka}]{sisson2007sequential}
+\textsc{Sisson, S.~A.}, \textsc{Fan, Y.} \& \textsc{Tanaka, M.~M.} (2007).
+\newblock Sequential monte carlo without likelihoods.
+\newblock \textit{Proceedings of the National Academy of Sciences}
+  \textbf{104}, 1760--1765.
+
+\bibitem[{Sisson et~al.(2009)Sisson, Fan \&
+  Tanaka}]{sissonCorrectionSissonSequential2009}
+\textsc{Sisson, S.~A.}, \textsc{Fan, Y.} \& \textsc{Tanaka, M.~M.} (2009).
+\newblock Correction for {{Sisson}} et al., {{Sequential Monte Carlo}} without
+  likelihoods.
+\newblock \textit{Proceedings of the National Academy of Sciences}
+  \textbf{106}, 16889--16889.
+
+\bibitem[{Tavar{\'e} et~al.(1997)Tavar{\'e}, Balding, Griffiths \&
+  Donnelly}]{tavareInferringCoalescenceTimes1997}
+\textsc{Tavar{\'e}, S.}, \textsc{Balding, D.~J.}, \textsc{Griffiths, R.~C.} \&
+  \textsc{Donnelly, P.} (1997).
+\newblock Inferring {{Coalescence Times From DNA Sequence Data}}.
+\newblock \textit{Genetics} \textbf{145}, 505--518.
+
+\bibitem[{Toni et~al.(2008)Toni, Welch, Strelkowa, Ipsen \&
+  Stumpf}]{toniApproximateBayesianComputation2008}
+\textsc{Toni, T.}, \textsc{Welch, D.}, \textsc{Strelkowa, N.}, \textsc{Ipsen,
+  A.} \& \textsc{Stumpf, M. P.~H.} (2008).
+\newblock Approximate {{Bayesian}} computation scheme for parameter inference
+  and model selection in dynamical systems.
+\newblock \textit{Journal of The Royal Society Interface} .
+
+\end{thebibliography}

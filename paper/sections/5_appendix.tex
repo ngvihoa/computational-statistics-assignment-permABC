@@ -1,0 +1,417 @@
+\section{Stratified version of permABC}
+\label{sec:appendix_strat}
+
+Even though permABC is equivalent to classical ABC in the small $\varepsilon$ regime, it differs outside of this regime because it integrates $\simdata$ into the constrained space $\dataspace_{\obsdata}^*$. Here, we propose a method called stratified permABC, which maintains the same acceptance rate but is exactly equivalent to ABC regardless of the value of $\varepsilon$.
+
+In the stratified permABC algorithm, similar to the standard approach, we sample from the prior $\parprop \sim \pi(\cdot)$ and then sample data from the likelihood: $\simdata \sim f(\cdot \mid \parprop)$. Here, we consider the set of all permutations in the symmetric group $\mathcal{S}_K$, and determine the subset of acceptable permutations $\mathcal S_K^\varepsilon = { \sigma \in \mathcal S_K : d(\obsdata,\simdata_{\sigma}) \leq \varepsilon }$. The acceptance condition is then $\left | \mathcal S_K^\varepsilon \right | > 0$, which is equivalent to $\min_{\sigma \in \mathcal S_K} d(\obsdata,\simdata_{\sigma}) \leq \varepsilon$. We then accept the simulated $\parprop_{\sigma'}$, where $\sigma' \sim \mathcal U(\mathcal S_K^\varepsilon)$ with a weight proportional to $\lvert \mathcal S_K^\varepsilon \rvert$.
+
+This methodology produces samples from the classical ABC pseudo-posterior distribution:
+\begin{equation}
+    \begin{split}
+        \bar \pi_{\varepsilon} (\param \mid \obsdata) & \propto \pi(\param) \int_{A_{\obsdata,\varepsilon}} \frac{f(\simdata \mid \param)}{\lvert \mathcal S_K^\varepsilon \rvert} d\simdata \cdot \lvert \mathcal S_K^\varepsilon \rvert\\
+        & \propto \pi_{\varepsilon} (\param \mid \obsdata)
+    \end{split}
+\end{equation}
+
+
+However, this ABC scheme is impractical because it is too costly. Sampling $K!$ permutations is unfeasible. Thus, we can write this last quantity $\lvert \mathcal S_K^\varepsilon \rvert$ as $\mathbb{E}_{\sigma \sim \mathcal{U}(\mathcal{S}_K)}\left[\mathbb{I}_{A_{\obsdata,\varepsilon}}(\simdata_{\sigma})\right]$, which we will estimate by Monte Carlo. For small $\varepsilon$, a standard Monte Carlo simulation will have large variance: indeed, for most permutations $\sigma$, $d(\eta(\obsdata), \eta(\simdata_{\sigma})) > \varepsilon$, i.e., $\mathbb{I}_{A_{\obsdata,\varepsilon}}(\simdata_{\sigma})=0$. 
+
+Instead, we resort to importance sampling. We write
+
+\[\mathbb{E}_{\sigma \sim \mathcal{U}(\mathcal{S}_K)}\left[\mathbb{I}_{A_{\obsdata,\varepsilon}}(\simdata_{\sigma})\right] = 
+\mathbb{E}_{\sigma \sim \rho}\left[\frac{\mathbb{I}_{A_{\obsdata,\varepsilon}}(\simdata_{\sigma})}{K!\rho(\sigma)}\right]\]
+
+To do this, we sample $\sigma_{\iperm} \sim \rho(\sigma)$ for $\iperm=1,\dots, L$ and replace the weights $\lvert \mathcal S_K^\varepsilon \rvert$ by the following importance sampling estimator: $\frac{1}{L}\sum_{l=1}^L \frac{\mathbb{I}_{A_{\obsdata,\varepsilon}}(\simdata_{\sigma_{\iperm}})}{\rho(\sigma_{\iperm})}$. 
+
+% We obtain the approximation:
+% \begin{equation}
+%     \pi_{\varepsilon} (\param \mid \obsdata)  \approx \pi(\param) \int   f(\simdata \mid \param) \sum_{\iperm=1}^L \frac{\mathbb{I}_{A_{\obsdata,\varepsilon}}(\simdata_{\sigma_{\iperm}})}{\rho(\sigma_{\iperm})} d\simdata
+% \end{equation}
+
+
+We now look for a good proposal distribution $\rho$ over $\mathcal{S}_K$.
+
+\subsection{Simulating Non-uniform Permutations}
+\label{secperm}
+
+A good proposal $\pi$ will have support all of the symmetric group $\mathcal{S}_K$, but will be concentrated on values which are more likely to verify $\sigma$, $d(\eta(\obsdata), \eta(\simdata_{\sigma})) < \varepsilon$. We proceed in two steps:
+
+\begin{itemize}
+    \item We compute $\sigma^* = \arg\min_{\sigma} d(\eta(\obsdata), \eta(\simdata_{\sigma}))$, which can be done efficiently using a Jonker-Volgenant algorithm. (Complexity $\mathcal{O}(K^3)$)
+    \item If $d(\eta(\obsdata), \eta(\simdata_{\sigma^*})) > \varepsilon$, we must reject $\param$. On the other hand, if $d(\eta(\obsdata), \eta(\simdata_{\sigma^*})) < \varepsilon$, we use a distribution $\rho(\cdot\mid\sigma^*)$ concentrated near $\sigma^*$.
+\end{itemize}
+
+
+
+We now propose a strategy to devise such a distribution $\rho(\cdot\mid\sigma^*)$. An additional constraint is that since this distribution will be used in importance sampling, its probability mass function must be computable pointwise. Our distribution is best understood through its generative process:
+
+\begin{enumerate}
+    \item Generate an auxiliary variable $N$ from a distribution $p_N$ with support $\{1, \ldots, K\}$; we choose the arbitrary distribution $N \sim 1 + \text{Poisson}(\lambda)$ truncated at $K$.
+    \item If $N = 1$ then return $\sigma = \sigma^*$.
+    \item If $N > 1$, generate $\sigma$ uniformly from the set $\mathfrak{S}_N = \left\{\sigma \in \mathcal{S}_K: \lVert \sigma - \sigma^*\rVert_0 = N\right\}$ where $\lVert \cdot \rVert_0$ is the Hamming or edit distance: $\lVert\sigma - \sigma^*\rVert_0 = \sum_{j=1}^K \mathbb{I}_{\{\sigma(i) \neq \sigma^*(i)\}}$.
+\end{enumerate}
+
+Note that this choice is valid because $\cup_n \mathfrak{S}_n = \mathcal{S}_K$ and because $\mathfrak{S}_1 = \emptyset$ and $\mathfrak{S}_0 = \{\sigma^*\}$. 
+
+To generate uniformly from $\mathfrak S_n$, we select uniformly $n$ elements out of $K$, generate a random derangement of length $n$, and apply it to the selected elements. Recall that a derangement is a permutation that leaves no point invariant; the number of derangements of length $n$ is called the subfactorial of $n$, denoted by $!n$ and is easily computed: $!n = n! \sum_{k=0}^n \frac{(-1)^k}{k!} = \lceil \frac{n!}{e} \rfloor$ where $\lceil \cdot \rfloor$ denotes the closest integer.
+The set $\mathfrak{S}_n$ is known as the set of the partial derangements and is then such that $\lvert \mathfrak S_n \rvert = \binom{K}{n} !n$. 
+Thus the probability of sample $\sigma^*$ is: $\rho(\sigma^*\mid \sigma^*) = p_N(1)$ and for  permutation $\sigma \neq \sigma^*$, let $n = \lVert\sigma - \sigma^*\rVert_0$,  the mass function at $\sigma$ is:
+
+$$\rho(\sigma\mid\sigma^*) = p_N(n)\frac{1}{\lvert \mathfrak{S}_n \rvert} = p_N(n)\frac{1}{\binom{K}{n}!n}$$.
+
+\subsection{Stratified estimator}
+\label{appendix_secstrat}
+With this instrumental distribution centered at $\sigma^*$, we can enhance the effectiveness of our method through the implementation of a stratified estimator. In doing so, we can manage the permutations we randomly sample, ensuring acceptance of parameter $\parprop$ if at least one permutation (specifically $\sigma^*$) satisfies the ABC conditions.
+
+We establish a partition of the set $\mathcal S_K$ into $H$ strata denoted as $(D_h)$ with corresponding weights $(w_h)$ for $h=1,\dots,H$. Here, $D_1 = \mathfrak S_0 = \{ \sigma^* \}$, $D_h = \mathfrak S_h$ for $h = 2,\dots,H-1$, and finally $D_H = \cup_{h=H}^K \mathfrak S_h$, with $w_h = p_N(h)$ for $h=1,\dots,H-1$ and $w_H = \sum_{h'=H}^K p_N(h')$. Subsequently, we define a new sampling distribution as a mixture across our strata: $\rho(\sigma)= \sum_{h=1}^H w_h \cdot \rho_h(\sigma)$, where $\rho_h$ represents the distribution within each stratum $D_h$: $\rho_h = \mathcal U(D_h)$ for $h=1,\dots,H-1$, and $\rho_H = \frac{1}{w_H}\sum_{h=H}^K p_N(D_h)\cdot \mathcal U(\mathfrak S_h)$. Additionally, we select the positive number $\Npermstrat{h}>0$ of permutations within each stratum. Thus, for the initial stratum, we must have $\Npermstrat{1} = 1$, ensuring consideration of $\sigma^*$, and $\Npermstrat{h}>0$ for $h=2,\dots,H$. Consequently, we derive the following stratified estimator with $\sigma_{\iperm}^{(h)} \sim \rho_h$ for $h=1,\dots,H$ and $\iperm=1,\dots,\Npermstrat{h}$:
+
+$$\mathbb E_{\sigma \sim \mathcal U(\mathcal S_K)} \left [ \mathbb I_{A_{\obsdata,\varepsilon}}(\simdata_{\sigma}) \right] \approx \sum_{h=1}^H \frac{1}{\Npermstrat{h}} \sum_{l=1}^{\Npermstrat{h}}\frac { \mathbb I_{A_{\obsdata,\varepsilon}}(\simdata_{\sigma_l^{(h)}})}{\rho_h(\sigma_l^{(h)})} $$
+
+
+
+
+% We will use the variable denoted as $N$ from the distribution $\pi(\cdot\mid \sigma^*)$ as the stratification variable. This variable has a support of $\{1,\dots,\Clust\}$, so we define a partition of $M$ sets of $\{1,\dots,\Clust\}$ denoted as $(D_\istrat)$ for $\istrat=1,\dots,\Nstrat$. This partition will be of the form: $D_\istrat = \{\istrat\}$ for $\istrat=1,\dots,\Nstrat-1$ and $D_\Nstrat = \{\Nstrat,\dots,\Clust\}$.
+
+% We then need to choose the positive number $\Npermstrat{\istrat}>0$ of permutations in each stratum.  Thus, for the first stratum, we must have $\Npermstrat{1} = 1$ because when we set $\varstrat=1$, we deterministically obtain $\sigma^*$. Then we have one permutation that verifies the ABC acceptance condition and arbitrarily set the others $\Npermstrat{2},\dots,\Npermstrat{\Nstrat}$. 
+% For the other strata (except the last one), we have: for $m=2,\dots,M-1$, $\pi(\cdot\mid \sigma^*, \sigma \in \cup_{n\in D_h} \mathfrak{S}_n )\equiv \mathcal U(\mathfrak{S}_h})$.
+
+% Thus, for $\istrat=1,\dots,\Nstrat$, we sample $\sigma_1^{(\istrat)},\dots,\sigma_{\Npermstrat{\istrat}}^{(\istrat)} \sim \pi(\cdot\mid \sigma^*, \sigma \in \cup_{\varstrat\in D_h} \mathfrak{S}_\varstrat )$. Therefore, we obtain:
+
+% \begin{equation} 
+% \label{eqstratt}
+% \begin{split}
+% \mathbb{E}_{\sigma \sim\pi}\left[\frac{\mathbb{I}_{A_{\obsdata,\sigma,\varepsilon}}}{K!\rho(\sigma\mid\sigma^*)}\right]  & =  \sum_{\istrat=1}^\Nstrat p_N(D_\istrat) \mathbb{E}_{\sigma \sim \pi}\left[\frac{\mathbb{I}_{A_{\obsdata,\sigma,\varepsilon}}}{\Clust!\rho(\sigma\mid\sigma^*)}\large\mid  \sigma \in \cup_{\varstrat\in D_\istrat} \mathfrak{S}_n\right] \\
+% & \approx \sum_{\istrat=1}^\Nstrat p_\Varstrat(D_\istrat) \frac{1}{\Npermstrat{\istrat}}\sum_{\iperm=1}^{\Npermstrat{\istrat}} \frac{\mathbb{I}_{A_{\obsdata,\sigma_{\iperm}^{(\istrat)},\varepsilon}}(\simdata)}{\rho(\sigma_{\iperm}^{(\istrat)}\mid \sigma^*)}
+% \end{split}
+% \end{equation}
+
+In this section, we have presented an effective ABC simulation method that seamlessly integrates with the traditional accept-reject ABC Algorithm, often referred to as ABC Vanilla. This integration leads to the formulation of Algorithm \ref{alg:permABC_star}, which we specifically label as permABC Vanilla.
+
+% \textcolor{red}{\textbf{A faire :Rajouter des resultats qui montre qu'on est K! plus efficaces en nombre de simulations.}}
+% \begin{algorithm}
+% \caption{Stratified permABC Vanilla}\label{alg:permABC}
+
+% \begin{algorithmic}
+
+%     \For{i = 1,...,N}
+%         \State $d_i=\varepsilon+1$ \\
+%         \While{$d_i> \varepsilon$}
+%             \State Simulate $\parprop \sim \pi(\cdot)$. \\
+%             \State Simulate $\simdata$ from the likelihood $f(\cdot \mid \parprop)$. \\
+%             \State Find $\sigma^* = \argmin_{\sigma} d(\obsdata, \simdata_{\sigma})$. \\
+%             \State Set $d_i^* = d(\obsdata, \simdata_{\sigma^*})$. \\
+%             \If{$d_i^* < \varepsilon$}
+%                 \State Generate $\sigma_{1}^{(\istrat)},\dots,\sigma_{\Npermstrat{\istrat}}^{(\istrat)} \sim \rho_h(\cdot)$ for $\istrat=1,\dots,\Nstrat$.\\
+%                 \State Compute $d_{\iperm}^{(\istrat)} = d(\obsdata, \simdata_{\sigma_{\iperm}^{(\istrat)}})$ for $\istrat=1,\dots,\Nstrat$ and $l = 1,\dots,\Npermstrat{\istrat}$. \\
+%                 \State Set the weights $\omega_{\iperm}^{(\istrat)} = \frac{\mathbb{I}_{d_{\iperm}^{(\istrat)} < \varepsilon}}{\rho_h(\sigma_{\iperm}^{(\istrat)})}$ and normalized weight $\tilde{\omega}_{\iperm}^{(\istrat)}$. \\
+
+%                 \State Pick $\sigma^{\text{prop}}$ in $(\sigma_{\iperm}^{(\istrat)})_{\iperm,\istrat}$ with probability $(\tilde\omega_{\iperm}^{(\istrat)})_{\iperm,\istrat}$. \\
+                
+%                 \State Accept $\param_i=\parprop_{\sigma^{\text{prop}}}$ with a weight $W_i \propto\sum_{h=1}^H \frac{1}{\Npermstrat{h}} \sum_{l=1}^{\Npermstrat{h}}\frac { \mathbb I_{A_{\obsdata,\varepsilon}}(\simdata_{\sigma_l^{(h)}})}{\rho_h(\sigma_l^{(h)})} $. \\
+%             \Else
+%                 \State Set $d_i = \varepsilon_t + 1$
+%             \EndIf
+%         \EndWhile
+%     \EndFor
+
+% \end{algorithmic}
+% \end{algorithm}
+
+
+\begin{algorithm}
+\caption{Stratified permABC Vanilla}
+% \label{alg:permABC}
+\textbf{Input: } observed dataset $\obsdata$, number of iterations $N$, threshold $\varepsilon > 0$, number of strata $H$, proposal distributions $\rho_1, \dots, \rho_H$. \\
+\textbf{Output: } a sample $\{\param^{(1)}, \dots, \param^{(N)}\}$ from the permuted ABC approximation $\pi_\varepsilon(\cdot \mid \obsdata)$.\\
+
+\BlankLine
+
+\For{$i = 1, \dots, N$}{
+    \Repeat{$d(\obsdata, \simdata_{\sigma^*}) \leq \varepsilon$}{
+        $\parprop \sim \pi(\cdot)$\;
+        $\simdata \sim f(\cdot \mid \parprop)$\;
+        $\sigma^* = \argmin_{\sigma} d(\obsdata, \simdata_\sigma)$\;
+        $d_i^* = d(\obsdata, \simdata_{\sigma^*})$\;
+    }
+
+    \For{$h = 1, \dots, H$}{
+        Generate permutations $\sigma_1^{(h)}, \dots, \sigma_{L_h}^{(h)} \sim \rho_h(\cdot)$\;
+        \For{$l = 1, \dots, L_h$}{
+            Compute $d_l^{(h)} = d(\obsdata, \simdata_{\sigma_l^{(h)}})$\;
+            Compute weight $\omega_l^{(h)} = \frac{\mathbb{I}\{d_l^{(h)} < \varepsilon\}}{\rho_h(\sigma_l^{(h)})}$\;
+        }
+    }
+
+    Normalize all weights: $\tilde{\omega}_l^{(h)} = \omega_l^{(h)} / \sum_{h=1}^H \sum_{l=1}^{L_h} \omega_l^{(h)}$\;
+
+    Sample $\sigma^{\text{prop}}$ among $\{\sigma_l^{(h)}\}_{l,h}$ with probability $\tilde{\omega}_l^{(h)}$\;
+
+    Set $\param^{(i)} = \parprop_{\sigma^{\text{prop}}}$\;
+
+    Assign weight $W_i \propto \sum_{h=1}^H \frac{1}{L_h} \sum_{l=1}^{L_h} \frac{\mathbb{I}\{d(\obsdata, \simdata_{\sigma_l^{(h)}}) < \varepsilon\}}{\rho_h(\sigma_l^{(h)})}$\;
+}
+\end{algorithm}
+
+
+\section{Theoretical Guarantees for permABC}
+\label{appendix_proofs}
+
+We now provide the proofs of the theoretical results stated in Section~\ref{sec:comparison}. The key insight is that for small enough $\varepsilon$, the optimal permutation is unique, which implies that permABC and standard ABC accept the same samples.
+
+\begin{proof}[of Lemma~\ref{lempermABC_star}]
+Let $\sigma^* := \arg\min_{\sigma \in \mathcal{S}_K} d(\obsdata, \simdata_{\sigma})$ and assume $\varepsilon < \varepsilon^*$. We consider two cases:
+
+\textbf{Case 1:} If $d(\obsdata, \simdata_{\sigma^*}) > \varepsilon$, then no permutation satisfies the ABC condition:
+\[
+\mathrm{Card} \left( \left\{ \sigma \in \mathcal{S}_K : d(\obsdata, \simdata_{\sigma}) \leq \varepsilon \right\} \right) = 0.
+\]
+
+\textbf{Case 2:} Suppose without loss of generality that $\sigma^* = \mathrm{Id}$ and $d(\obsdata, \simdata) \leq \varepsilon$. For any $\sigma \neq \mathrm{Id}$, we have:
+\[
+\begin{aligned}
+d(\obsdata, \simdata_{\sigma}) 
+&\geq \left| d(\obsdata, \obsdata_{\sigma}) - d(\obsdata_{\sigma}, \simdata_{\sigma}) \right| \\
+&= \left| d(\obsdata, \obsdata_{\sigma}) - d(\obsdata, \simdata) \right| \\
+&> \varepsilon,
+\end{aligned}
+\]
+since $d(\obsdata, \obsdata_{\sigma}) > 2\varepsilon$ and $d(\obsdata, \simdata) \leq \varepsilon$. Therefore, only the identity permutation satisfies the ABC criterion.
+\end{proof}
+
+\medskip
+
+\begin{proof}[of Theorem~\ref{th:permABC_star}]
+Let $\varepsilon < \varepsilon^*$. For every simulated dataset $\simdata \in B_\varepsilon(\obsdata)$ such that $d(\obsdata, \simdata) \leq \varepsilon$, Lemma~\ref{lempermABC_star} implies that at most one permutation satisfies $d(\obsdata, \simdata_{\sigma}) \leq \varepsilon$. In that case, the optimal permutation is necessarily $\sigma = \mathrm{Id}$.
+
+Consequently, permABC and standard ABC both accept the same set of simulations, and:
+\[
+A^*_{\obsdata,\varepsilon} = B_{\varepsilon}(\obsdata) \cap \dataspace_{\obsdata}^{*K} = B_{\varepsilon}(\obsdata) = A_{\obsdata,\varepsilon},
+\]
+which implies:
+\[
+\pi^*_{\varepsilon}(\cdot \mid \obsdata) = \pi_{\varepsilon}(\cdot \mid \obsdata).
+\]
+
+
+\end{proof}
+
+\medskip
+
+\begin{proof}[of Corollary~\ref{col:permabc}]
+By Theorem~\ref{th:permABC_star}, we have $\pi^*_{\varepsilon}(\cdot \mid \obsdata) = \pi_{\varepsilon}(\cdot \mid \obsdata)$ for all $\varepsilon < \varepsilon^*$. If $\pi_{\varepsilon}(\cdot \mid \obsdata) \to \pi(\cdot \mid \obsdata)$ as $\varepsilon \to 0$, then the same convergence holds for $\pi^*_{\varepsilon}(\cdot \mid \obsdata)$.
+\end{proof}
+
+
+
+\section{Technical Details for Over-Sampling}
+\label{appendix_os}
+
+\subsection{Formal Definition of \( \pi^{*M}_\varepsilon \)}
+
+Given a dataset \( \obsdata \in \dataspace^K \), the Over-Sampling acceptance condition selects particles whose associated simulated data \( \simdata \in \dataspace^M \) satisfy the constraint:
+\[
+\min_{\sigma \in \mathcal A_K^M} d(\obsdata, \simdata_\sigma) \leq \varepsilon.
+\]
+We denote the acceptance region by
+\[
+\tilde A_{\varepsilon, \obsdata}^{M} = \left\{ \simdata \in \dataspace^M \mid \min_{\sigma \in \mathcal A_K^M} d(\obsdata, \simdata_\sigma) \leq \varepsilon \right\}.
+\]
+
+The associated joint pseudo-posterior is then defined as:
+\[
+\tilde{\pi}_\varepsilon^M(\param, \simdata \mid \obsdata) \propto \pi(\param) f(\simdata \mid \param) \, \mathbb{I}_{\tilde A_{\varepsilon, \obsdata}^{M}}(\simdata).
+\]
+
+To restore identifiability, we apply a projection \( \proj \) that reorders the parameters and data. Specifically, the optimal partial permutation \( \sigma^* \in \mathcal A_K^M \) is used to assign the best-matching \( K \) simulated compartments to the observed data. The remaining \( M - K \) components are sorted by index. We define:
+\[
+\proj(\param, \simdata) := (\param_{\sigma^*}, \simdata_{\sigma^*}),
+\]
+and the projected joint pseudo-posterior becomes:
+\[
+\pi^{*M}_{\varepsilon}(\param, \simdata \mid \obsdata)
+:= \projsharp \tilde{\pi}_{\varepsilon}^{M}(\param, \simdata \mid \obsdata)
+\]
+
+
+This distribution lives on \( \Theta^M \times \dataspace^M \), but we are primarily interested in the marginals over the global parameter \( \globparam \) and the local parameters \( \locparam_{1:K} \) corresponding to the optimally matched compartments.
+
+\subsection{Choosing \( \varepsilon \) Given \( M_0 \)}
+
+As discussed in Section~\ref{sec:permABC_OS}, the acceptance condition \eqref{eq:os} becomes easier to satisfy as \( M \) increases. Consequently, for a given tolerance \( \varepsilon \), a larger value of \( M \) results in a higher acceptance probability. To ensure that a sufficient number of particles are alive in the initial iteration, one must jointly select \( M_0 \) and \( \varepsilon \) so as to reach a desired acceptance rate.
+
+Empirically, the optimal assignment distance \( \min_{\sigma} d(\obsdata, \simdata_\sigma) \) tends to decrease monotonically with \( M \). Given a simulation budget of \( N \) particles, we define the calibration of \( \varepsilon \) as the smallest value such that at least a proportion \( p \) of the simulated datasets satisfy the condition:
+\[
+\varepsilon := \inf \left\{ \varepsilon > 0 \mid \frac{1}{N} \sum_{i=1}^N \mathbb{I} \left( \min_\sigma d(\obsdata, \simdata^{(i)}_\sigma) \leq \varepsilon \right) \geq p \right\}.
+\]
+
+In other words, \( \varepsilon \) is chosen as the empirical quantile of order \( p \) of the distances \( \min_\sigma d(\obsdata, \simdata^{(i)}_\sigma) \), computed on the initial sample. This guarantees that a proportion approximately $p$ of the particles satisfy the acceptance criterion and can thus be propagated into the first population. In practice, we recommend using \( p = 0.95 \).
+
+\subsection{Designing the Sequence \( M_t \)}
+
+To avoid sudden drops in the acceptance rate between iterations, the sequence \( M_t \) must decay smoothly. A practical heuristic is to choose:
+\[
+M_{t+1} = \lfloor K + (M_t - K) \gamma \rfloor \wedge M_t -1
+\]
+for some decay exponent \( \gamma > 0 \). This schedule allows for a slow reduction at the beginning (when population diversity is critical), followed by a sharper decay toward the final iteration where convergence to \( M_T = K \) is enforced. In practice, we recommend using a conservative value such as \( \gamma = 0.9 \).
+
+\subsection{Particle Duplication Strategy}
+
+Even under a conservative schedule such as \( M_{t+1} = M_t - 1 \), the probability of discarding particles during the transition from iteration \( t \) to \( t+1 \) can remain high. This is due to the potential exclusion of compartments that previously matched the observed data under the acceptance criterion \eqref{eq:os}.
+
+More precisely, the probability that a matched compartment from iteration \( t \) is excluded from the optimization at iteration \( t+1 \) can be upper bounded by:
+\[
+1 - \frac{(M_t - K)!}{(M_{t+1} - K)!} \cdot \frac{M_{t+1}!}{M_t!},
+\]
+which equals \( K/(K+1) \) in the case \( M_t = K + 1 \) and \( M_{t+1} = K \). This bound highlights the non-negligible risk of mass extinction, especially in the final iterations.
+
+To mitigate this, we introduce a duplication mechanism. Before evaluating the acceptance condition at iteration \( t+1 \), each accepted particle from iteration \( t \) is replicated \( R \) times using independent random partial permutations \( \sigma_1, \dots, \sigma_R \in \mathcal{A}_K^{M_{t+1}} \), where we may assume \( \sigma_1 = \mathrm{Id} \) for simplicity. For each duplicated version, we test the acceptance criterion on \( \simdata_{\sigma_r} \) for \( r = 1, \dots, R \).
+
+This procedure increases the likelihood that at least one configuration of the particle will pass the acceptance test, without requiring additional simulations of the likelihood. However, it does incur additional computational cost due to the \( R \) assignment problems per particle. In practice, we find that values such as \( R = 5 \) or \( R = 10 \) are sufficient to ensure stability while keeping the cost reasonable. The value of \( R \) can be chosen adaptively based on the upper bound described above.
+
+\section{Technical Details for Under-Matching}
+\label{appendix_um}
+
+\subsection{Distance, Acceptance Region, and Projection}
+
+As introduced in Section~\ref{sec:undermatching}, the under matching strategy accepts simulated datasets \( \simdata \in \dataspace^K \) when a subset of \( L < K \) compartments can be matched to observed data. The acceptance region is defined as:
+\[
+\tilde A_{\varepsilon, \obsdata}^{L} = \left\{ \simdata \in \dataspace^K \mid \min_{\sigma, \tilde{\sigma} \in \mathcal A_L^K} d(\obsdata_{\tilde \sigma}, \simdata_\sigma) \leq \varepsilon \right\}.
+\]
+
+The pseudo-posterior then takes the form:
+\[
+\tilde{\pi}_\varepsilon^L(\param, \simdata \mid \obsdata) \propto \pi(\param) f(\simdata \mid \param) \, \mathbb{I}_{\tilde A_{\varepsilon, \obsdata}^{L}}(\simdata).
+\]
+
+As in the Over-Sampling case, we define a projection operator \( \proj \) that maps each accepted pair \( (\param, \simdata) \) to a reordered version where the \( L \) optimally matched components are moved to the top \( L \) positions, and the remaining \( K - L \) components follow in order. This projected distribution, denoted \( \pi^{*L}_\varepsilon \), focuses on inference for the global parameter and the best-matching local components.
+
+\subsection{Designing the Sequence \( L_t \)}
+
+To guide the algorithm toward the full matching regime, we define a growing schedule:
+\[
+L_{t+1} = \lfloor L_t + (K - L_t) \cdot (1-\gamma) \rfloor \vee L_t + 1
+\]
+for some smoothing exponent \( \gamma \in (0, 1] \). This ensures that the number of matched compartments increases gradually toward \( K \), with smaller changes in the early iterations and a final push to full matching.
+
+In practice, values such as \( \gamma = 0.8 \) or \( 0.9 \) offer a good trade-off between gradual adaptation and final convergence. The stopping point of the algorithm is \( L_T = K \), at which point the standard permABC acceptance condition is recovered.
+
+% \subsection{Sensitivity and Robustness}
+
+% The main motivation for using under matching is robustness: when the model is suspected to be misspecified for one or several compartments, enforcing full matching from the start may severely reduce the acceptance rate or lead to degeneracy.
+
+% By gradually increasing the number of matched compartments, the algorithm can initially ignore problematic components, allowing the rest of the data to drive inference. As the process progresses, the algorithm incorporates more information, balancing robustness with accuracy.
+
+% This approach is particularly useful when some observed compartments are suspected outliers, or when prior predictive checks indicate poor model fit in specific locations. In such cases, permABC-Under-Matching offers a flexible and principled alternative to standard ABC.
+
+
+\section{Blockwise Metropolis-within-Gibbs Kernel}
+\label{appendix_kernel}
+
+This section details the MCMC transition kernel used in the permABC-SMC algorithm. At each iteration, the algorithm performs both a global move and a local move, ensuring comprehensive exploration of the posterior while maintaining computational efficiency through partial updates.
+
+The global move proposes a new value for the shared parameter \( \globparam \) using a symmetric random walk proposal kernel \( q_t \), as defined in Section~\ref{sec:kernels}. Synthetic data are then generated for all compartments using the proposed value \( \globparam^* \), and the optimal permutation minimizing the distance to the observed data is computed. The proposal is accepted or rejected based on the ABC Metropolis–Hastings criterion, using the full data discrepancy.
+
+The local move updates the collection of local parameters \( \locparam_1, \dots, \locparam_K \) blockwise. The set of compartments is randomly partitioned into \( H \) equally sized blocks. Within each block, new parameters are proposed using the same Gaussian random walk kernel \( q_t \), and new synthetic data are generated only for the updated compartments. The new configuration is accepted or rejected based on the global ABC condition, ensuring coherence of the posterior sample across all compartments.
+
+Performing both global and local moves at every iteration leads to a total of \( 2NK \) data simulations per iteration for a particle population of size \( N \), and requires \( N(1 + H) \) linear assignment resolutions: one for the global move, and \( H \) for the local updates.
+
+Although this construction is reminiscent of ABC-Gibbs methods, such as \citet{clarte2021componentwise}, the key distinction lies in the evaluation of the ABC discrepancy. In our case, the acceptance criterion remains global—defined over the full dataset—regardless of whether global or local parameters are being updated. This ensures that accepted configurations correspond to coherent fits to the observed data across all compartments.
+
+In the Over-Sampling setting, we consider a total of \( M > K \) compartments. At iteration \( t \), the kernel operates on the current set of \( M_t \) simulated compartments, among which only \( K \) are matched to the observed data under the optimal injection. These \( K \) matched compartments are partitioned into \( H \) blocks for Gibbs updates using the kernel \( q_t \), while the remaining \( M_t - K \) unmatched compartments form a separate block, updated independently by redrawing from the prior. Components beyond \( M_t \) are frozen.
+
+In the Under-Matching setting, the kernel operates on the current subset of \( L_t < K \) matched compartments. These \( L_t \) compartments are partitioned into \( H \) blocks, each updated via random walk proposals \( q_t \), while the \( K - L_t \) unmatched compartments are handled separately and sampled directly from the prior. In both cases, only the matched components contribute to the ABC discrepancy and drive acceptance.
+
+
+\begin{algorithm}
+\caption{MCMC kernel with global and local updates for permABC-SMC}
+\label{alg:kernel}
+
+\textbf{Input:} Current state $(\param, \simdata, \sigma)$, tolerance $\varepsilon$, number of blocks $H$ \\
+\textbf{Output:} New state $(\tilde \param, \tilde \simdata, \tilde \sigma)$ targeting $\pi_\varepsilon(\cdot, \cdot \mid \obsdata)$
+
+\BlankLine
+
+$\tilde \param \leftarrow \param$, $\tilde \simdata \leftarrow \simdata$, $\tilde \sigma \leftarrow \sigma$ \\
+
+\vspace{0.5em}
+\textit{Global update:} \\
+$\globparam^* \sim q_t(\cdot \mid \globparam)$ \\
+Generate: $\simdata_k^* \sim g(\cdot \mid \globparam^*, \locparam_k)$ for $k = 1, \dots, K$ \\
+Compute: $\sigma^* \leftarrow \argmin_{\sigma \in \mathcal{S}_K} d(\simdata^*_\sigma, \obsdata)$ \\
+Draw $U_g \sim \mathcal{U}(0,1)$ \\
+\If{
+$U_g \leq \dfrac{\pi(\globparam^*) q_t(\globparam \mid \globparam^*, \sigma^*)}{\pi(\globparam) q_t(\globparam^* \mid \globparam, \sigma)} \cdot \mathbb{I}_{\tilde A_{\obsdata, \varepsilon}}(\simdata^*)$
+}{
+    $\tilde \globparam \leftarrow \globparam^*$ \\
+    $\tilde \simdata \leftarrow \simdata^*$\\
+    $\tilde \sigma \leftarrow \sigma^*$ \\
+}
+
+\vspace{0.5em}
+\textit{Local update:} \\
+Randomly partition $\{1, \dots, K\}$ into $H$ blocks $(B_1, \dots, B_H)$ \\
+
+\For{$h = 1, \dots, H$}{
+    $\simdata^* \leftarrow \tilde \simdata$ \\
+    \For{$k \in B_h$}{
+        Propose: $\locparam_k^* \sim q_t(\cdot \mid \tilde \locparam_k, \tilde \sigma)$ \\
+        Simulate: $\simdata_k^* \sim g(\cdot \mid \tilde \globparam, \locparam_k^*)$
+    
+        Compute: $\sigma^* \leftarrow \argmin_{\sigma \in \mathcal{S}_K} d(\simdata^*_\sigma, \obsdata)$ \\
+        Draw $U_h \sim \mathcal{U}(0,1)$ \\
+        \If{
+        $U_h \leq \dfrac{\pi(\locparam_{B_h}^*) q_t(\tilde \locparam_{B_h} \mid \locparam_{B_h}^*, \sigma^*)}{\pi(\tilde \locparam_{B_h}) q_t(\locparam_{B_h}^* \mid \tilde \locparam_{B_h}, \tilde \sigma)} \cdot \mathbb{I}_{\tilde A_{\obsdata, \varepsilon}}(\simdata^*)$
+        }{
+            $\tilde \locparam_{B_h} \leftarrow \locparam_{B_h}^*$\\
+            $\tilde \simdata_{B_h} \leftarrow \simdata^*_{B_h}$\\
+            $\tilde \sigma \leftarrow \sigma^*$ \\
+        }
+    }
+}
+
+\textbf{Return:} $(\tilde \param, \tilde \simdata, \tilde \sigma)$ with $\tilde \param = (\tilde \globparam, \tilde \locparam)$
+
+\end{algorithm}
+
+
+
+\section{Comparison in Simulation Count and Wall-Clock Time}
+\label{sec:appendix_comparison}
+
+In this appendix, we complement the results presented in Sections~\ref{sec:gaussian_toy} and~\ref{sec:osum} by providing a joint comparison of ABC methods in terms of both simulation count and wall-clock time. These two metrics offer complementary perspectives on computational efficiency: the former captures algorithmic convergence speed, while the latter reflects the actual computational cost, including assignment resolution and data simulation.
+
+Figure~\ref{fig:appendix_time_gaussian} displays the total runtime required to reach a given tolerance \( \varepsilon \) for the hierarchical Gaussian model described in Equation~\eqref{eqgauss}, measured on a single-core CPU using identical implementation settings. The conclusions are consistent with those drawn from the simulation-count analysis in Figure~\ref{fig:vanilla_vs_smc}: permutation-based strategies reach lower tolerance levels more efficiently, and this advantage becomes increasingly significant as the number of compartments \( K \) increases.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[scale=.4]{fig/fig4_time_seed_42.pdf}
+    \caption{
+        Comparison of standard ABC methods and permutation-based variants on the Gaussian toy model, in terms of achieved tolerance \( \varepsilon \) versus wall-clock time. The \( x \)-axis shows the total runtime per 1,000 unique accepted particles (log-scale), and the \( y \)-axis represents the effective tolerance \( \varepsilon \) (log-scale). Permutation-based methods consistently outperform standard ABC in terms of both accuracy and computational cost.
+    }
+    \label{fig:appendix_time_gaussian}
+\end{figure}
+
+In the outlier-robustness setting discussed in Section~\ref{sec:osum}, Figure~\ref{fig:osum} reports the wall-clock time required to reach various tolerance levels. For completeness, we reproduce here the complementary figure comparing the same methods in terms of simulation count. The results confirm the improved sampling efficiency of Over-Sampling and Under-Matching strategies, particularly in the intermediate- and low-tolerance regimes.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[scale=.4]{fig/fig6_nsim_seed_42.pdf}
+    \caption{
+        Complementary comparison of ABC methods in terms of simulation count for the outlier-robustness scenario. The \( x \)-axis shows the total number of simulations per 1,000 unique accepted particles (log-scale), and the \( y \)-axis represents the effective tolerance \( \varepsilon \) (log-scale). Over-Sampling and Under-Matching improve sampling efficiency while maintaining robustness to model misspecification.
+    }
+    \label{fig:appendix_simcount}
+\end{figure}
+
+
+
+\section{Validation and Results of the SIR Model Application}
+\label{appendix_sir}
+
+\subsection{Preliminary Justification for the Hierarchical Structure}
+\label{appendix_sir_validation}
+
+Before applying permABC to the full departmental dataset, we performed a preliminary analysis to justify the modeling assumptions. In particular, we fitted independent SIR models to each department using standard ABC techniques. These runs revealed that although local dynamics exhibit variability in terms of initial conditions and intensity, the inferred values of the reproduction number \( R_0 \) were broadly consistent across departments during the first wave of the epidemic (March–July 2020).
+
+This empirical observation supports the use of a global \( R_0 \) parameter shared across all compartments, while allowing for department-specific local parameters \( \locparam_k = (I_k(0), R_k(0), \delta_k) \).
+
+The spatial distribution of \( \delta_k \) reflects variations in local factors such as population density, urbanization, mobility, or healthcare capacity. These differences highlight the necessity of treating local parameters separately in a hierarchical framework, rather than aggregating data at the national level.

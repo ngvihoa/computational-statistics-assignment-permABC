@@ -7,8 +7,8 @@ This approach can improve exploration and parameter recovery.
 """
 from typing import Tuple, Any, Dict
 from ..utils.functions import ess, resampling  # Fixed relative import
-from ..core.distances import optimal_index_distance  # Fixed relative import
-from ..core.moves import move_smc, move_smc_gibbs_blocks, calculate_overall_acceptance_rate  # Fixed relative import
+from ..assignment import optimal_index_distance
+from ..sampling import move_smc, move_smc_gibbs_blocks, calculate_overall_acceptance_rate
 from ..algorithms.smc import update_weights, _init_smc_tracking, _update_smc_tracking, _compute_smc_diagnostics, _compile_smc_results  # Fixed relative import
 import numpy as np
 from jax import random
@@ -19,9 +19,11 @@ import seaborn as sns
 from ..utils.functions import Theta
 
 
-def init_perm_over_sampling(key: random.PRNGKey, model: Any, n_particles: int, y_obs: np.ndarray, 
-                              epsilon: float, M_0: int, alpha_epsilon: float, verbose: int = 1, 
-                              update_weight_distance: bool = True) -> Tuple[Theta, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, float, int, float]:
+def init_perm_over_sampling(key: random.PRNGKey, model: Any, n_particles: int, y_obs: np.ndarray,
+                              epsilon: float, M_0: int, alpha_epsilon: float, verbose: int = 1,
+                              update_weight_distance: bool = True,
+                              cascade=None,
+                              ) -> Tuple[Theta, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, float, int, float]:
 
     """
     Initialize permutation-enhanced ABC with over-sampling.
@@ -83,7 +85,8 @@ def init_perm_over_sampling(key: random.PRNGKey, model: Any, n_particles: int, y
     
     # Compute optimal assignment with M_0 components
     distance_values, ys_index, zs_index, n_lsa = optimal_index_distance(
-        zs=zs, y_obs=y_obs, model=model, verbose=verbose, epsilon=epsilon, M=M_0
+        zs=zs, y_obs=y_obs, model=model, verbose=verbose, epsilon=epsilon, M=M_0,
+        cascade=cascade,
     )
     
     if verbose > 1:
@@ -185,13 +188,10 @@ def duplicate_particles(key: random.PRNGKey, model: Any, weights: np.ndarray, th
     if verbose > 1:
         print(f"Duplicating the {n_particles} alive particles in {n_duplicate} copies...")
 
-    # Create random permutations for duplicates
-    permutation_duplicates = random.permutation(
-        key, 
-        np.repeat([np.arange(old_M)], n_duplicate * n_particles, axis=0), 
-        axis=1, 
-        independent=True
-    )
+    # Create random permutations for duplicates (NumPy to avoid JAX recompilation)
+    rng = np.random.default_rng(int(key[0]))
+    base = np.repeat([np.arange(old_M)], n_duplicate * n_particles, axis=0)
+    permutation_duplicates = rng.permuted(base, axis=1)
     
     # CORRECTION : Duplicate and permute parameters
     new_thetas = thetas[alive].copy()
@@ -205,10 +205,9 @@ def duplicate_particles(key: random.PRNGKey, model: Any, weights: np.ndarray, th
     zs_to_permute = new_zs[:, :old_M]  # Les old_M premières colonnes
     zs_fixed = new_zs[:, old_M:]       # Le reste des colonnes
     
-    # Appliquer les permutations
-    zs_permuted = np.array([
-        zs_to_permute[i, perm] for i, perm in enumerate(permutation_duplicates)
-    ])
+    # Appliquer les permutations (vectorized advanced indexing)
+    row_idx = np.arange(len(zs_to_permute))[:, None]
+    zs_permuted = zs_to_permute[row_idx, permutation_duplicates]
     
     # Recombiner les parties permutées et fixes
     new_zs = np.concatenate([zs_permuted, zs_fixed], axis=1)
@@ -294,7 +293,8 @@ def perm_abc_smc_os(
     verbose: int = 1,
     duplicate: bool = False,
     n_duplicate: int = 0,
-    stopping_accept_rate: float = 0.0
+    stopping_accept_rate: float = 0.0,
+    cascade=None,
 ) -> Dict[str, Any]:
     """
     Permutation-enhanced ABC-SMC with over-sampling strategy.
@@ -388,7 +388,8 @@ def perm_abc_smc_os(
     thetas, zs, distance_values, ys_index, zs_index, weights, ess_val, n_lsa, epsilon = init_perm_over_sampling(
         key, model, n_particles, y_obs, epsilon, M_0, 
         verbose=verbose, alpha_epsilon=alpha_epsilon, 
-        update_weight_distance=update_weights_distance
+        update_weight_distance=update_weights_distance,
+        cascade=cascade,
     )
     alive = np.where(weights > 0.0)[0]
     
@@ -403,7 +404,7 @@ def perm_abc_smc_os(
     })
     
     # Initialize diagnostics
-    initial_diagnostics = _compute_smc_diagnostics(thetas, n_particles)
+    initial_diagnostics = _compute_smc_diagnostics(thetas, n_particles, skip=(verbose < 1))
     results_data.update({
         'Unique_p': [initial_diagnostics['unique_part']], 
         'Unique_c': [initial_diagnostics['unique_comp']],
@@ -460,7 +461,8 @@ def perm_abc_smc_os(
                   f"unique alive particles", end=" ")
         
         distance_values[alive], ys_index[alive], zs_index[alive], n_lsa = optimal_index_distance(
-            zs=zs[alive], y_obs=y_obs, model=model, verbose=verbose, epsilon=epsilon, M=M
+            zs=zs[alive], y_obs=y_obs, model=model, verbose=verbose, epsilon=epsilon, M=M,
+            cascade=cascade,
         )
     
         # Update weights
@@ -512,7 +514,8 @@ def perm_abc_smc_os(
                 key=key_move, model=model, thetas=thetas[alive], zs=zs[alive], 
                 weights=weights[alive], ys_index=ys_index[alive], zs_index=zs_index[alive], 
                 epsilon=epsilon, y_obs=y_obs, distance_values=distance_values[alive], 
-                kernel=kernel, verbose=verbose, perm=True, M=current_M
+                kernel=kernel, verbose=verbose, perm=True, M=current_M,
+                cascade=cascade,
             )
             
             # Update particles - ensure correct shapes
@@ -542,7 +545,8 @@ def perm_abc_smc_os(
                 key=key_move, model=model, thetas=thetas[alive], zs=zs[alive], 
                 weights=weights[alive], ys_index=ys_index[alive], zs_index=zs_index[alive], 
                 epsilon=epsilon, y_obs=y_obs, distance_values=distance_values[alive], 
-                kernel=kernel, H=num_blocks_gibbs, verbose=verbose, perm=True, M=current_M
+                kernel=kernel, H=num_blocks_gibbs, verbose=verbose, perm=True, M=current_M,
+                cascade=cascade,
             )
             
             # Update particles
@@ -574,7 +578,8 @@ def perm_abc_smc_os(
             
             distance_values[alive], ys_index[alive], zs_index[alive], n_lsa_update = optimal_index_distance(
                 zs=zs[alive], y_obs=y_obs, model=model, verbose=verbose, 
-                epsilon=epsilon, M=current_M, zs_index=zs_index[alive], ys_index=ys_index[alive]
+                epsilon=epsilon, M=current_M, zs_index=zs_index[alive], ys_index=ys_index[alive],
+                cascade=cascade,
             )
             
             weights = update_weights(weights, distance_values, epsilon)
@@ -605,7 +610,7 @@ def perm_abc_smc_os(
             zs_index = np.repeat([np.arange(model.K)], n_particles, axis=0)
         
         # Compute diagnostics
-        diagnostics = _compute_smc_diagnostics(thetas, n_particles)
+        diagnostics = _compute_smc_diagnostics(thetas, n_particles, skip=(verbose < 1))
         
         # Display progress
         if verbose > 0:

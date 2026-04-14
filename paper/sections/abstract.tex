@@ -1,0 +1,7 @@
+Approximate Bayesian Computation (ABC) methods have become essential tools for performing inference when likelihood functions are intractable or computationally prohibitive. However, their scalability remains a major challenge in hierarchical or high-dimensional models. In this paper, we introduce \emph{permABC}, a new ABC framework designed for settings with both global and local parameters, where observations are grouped into exchangeable compartments.
+Building upon the Sequential Monte Carlo ABC (ABC-SMC) framework, permABC exploits the exchangeability of compartments through permutation-based matching, significantly improving computational efficiency. 
+
+We then develop two further, complementary sequential strategies: \emph{Over-Sampling}, which  facilitates early-stage acceptance by temporarily increasing the number of simulated compartments, and \emph{Under-Matching}, which relaxes the acceptance condition by matching only subsets of the data.
+
+These techniques allow for robust and scalable inference even in high-dimensional regimes. Through synthetic and real-world experiments — including a hierarchical Susceptible-Infectious-Recover model of the early COVID-19 epidemic across 94 French departments — we demonstrate the practical gains in accuracy and efficiency achieved by our approach.
+\
