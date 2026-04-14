@@ -46,6 +46,8 @@ def distance_total(z, y):
 def setup_gibbs_functions_sir(model):
     """Create ABC-Gibbs step functions for SIR_real_world.
 
+    Uses the same distance as model.distance(): weighted sqrt(sum(w_k * diff_k^2)).
+
     Parameters
     ----------
     model : SIR_real_world
@@ -61,43 +63,26 @@ def setup_gibbs_functions_sir(model):
     n_pop = model.n_pop
     support_loc = np.array(model.support_par_loc)   # (3, 2): I0, R0_init, gamma
     support_glob = np.array(model.support_par_glob)  # (1, 2): R0
+    weights = np.array(model.weights_distance)       # (K,) — population weights
 
     def ABClocals(rng, jax_key, M, y_obs_2d, r0_current):
         """ABC step for (I0_k, R0_init_k, gamma_k) | R0, y, for each k independently.
 
-        For each k:
-          - draw M candidates from the prior Uniform(low, high)
-          - simulate SIR with those local params + current R0
-          - keep the candidate minimizing d(z_k, y_k)
-
-        Parameters
-        ----------
-        rng : np.random.Generator
-        jax_key : jax PRNGKey (for stochastic SIR simulation)
-        M : int
-        y_obs_2d : (K, n_obs)
-        r0_current : float
-
-        Returns
-        -------
-        locals_new : (K, 3) array
-        eps_per_k : (K,) array
-        n_sim : int
+        Distance per component: w_k * sqrt(sum((z_k - y_k)^2))
         """
         locals_new = np.zeros((K, 3))
         eps_per_k = np.zeros(K)
 
         for k in range(K):
-            # Draw M candidates for local params of region k from uniform prior
             loc_candidates = rng.uniform(
                 low=support_loc[:, 0],
                 high=support_loc[:, 1],
                 size=(M, 3),
             )  # (M, 3): I0, R0_init, gamma
 
-            I0_cand = jnp.array(loc_candidates[:, 0:1])    # (M, 1)
-            R0_init_cand = jnp.array(loc_candidates[:, 1:2])  # (M, 1)
-            gamma_cand = jnp.array(loc_candidates[:, 2:3])  # (M, 1)
+            I0_cand = jnp.array(loc_candidates[:, 0:1])
+            R0_init_cand = jnp.array(loc_candidates[:, 1:2])
+            gamma_cand = jnp.array(loc_candidates[:, 2:3])
             r0_arr = jnp.full((M, 1), r0_current)
             beta_cand = r0_arr * gamma_cand
             S0_cand = jnp.maximum(0.0, n_pop - I0_cand - R0_init_cand)
@@ -112,7 +97,8 @@ def setup_gibbs_functions_sir(model):
             zs_k = np.array(zs_k[:, 0, :])  # (M, n_obs)
 
             obs_k = y_obs_2d[k]  # (n_obs,)
-            dists = np.sum((zs_k - obs_k[None, :]) ** 2, axis=1)  # (M,)
+            # Weighted component distance: w_k * sqrt(sum((z_k - y_k)^2))
+            dists = weights[k] * np.sqrt(np.sum((zs_k - obs_k[None, :]) ** 2, axis=1))
             best = np.argmin(dists)
             locals_new[k] = loc_candidates[best]
             eps_per_k[k] = dists[best]
@@ -123,23 +109,7 @@ def setup_gibbs_functions_sir(model):
     def ABCglobal(rng, jax_key, M, y_obs_2d, locals_current):
         """ABC step for R0 | locals, y.
 
-        Draw M candidates R0 ~ Uniform(low_r0, high_r0),
-        simulate all K regions using current locals + candidate R0,
-        compute total distance, keep argmin.
-
-        Parameters
-        ----------
-        rng : np.random.Generator
-        jax_key : jax PRNGKey
-        M : int
-        y_obs_2d : (K, n_obs)
-        locals_current : (K, 3) array
-
-        Returns
-        -------
-        r0_new : float
-        eps_total : float
-        n_sim : int
+        Distance: sqrt(sum_k (w_k * (z_k - y_k))^2)  — same as model.distance()
         """
         r0_candidates = rng.uniform(
             low=support_glob[0, 0],
@@ -147,11 +117,11 @@ def setup_gibbs_functions_sir(model):
             size=M,
         )
 
-        I0_fixed = jnp.array(locals_current[None, :, 0].repeat(M, axis=0))   # (M, K)
+        I0_fixed = jnp.array(locals_current[None, :, 0].repeat(M, axis=0))
         R0_init_fixed = jnp.array(locals_current[None, :, 1].repeat(M, axis=0))
         gamma_fixed = jnp.array(locals_current[None, :, 2].repeat(M, axis=0))
-        r0_arr = jnp.array(r0_candidates[:, None])  # (M, 1)
-        beta = r0_arr * gamma_fixed  # (M, K)
+        r0_arr = jnp.array(r0_candidates[:, None])
+        beta = r0_arr * gamma_fixed
         S0 = jnp.maximum(0.0, n_pop - I0_fixed - R0_init_fixed)
 
         zs = simulate_sir_jax(
@@ -162,7 +132,10 @@ def setup_gibbs_functions_sir(model):
         )  # (M, K, n_obs)
         zs = np.array(zs)
 
-        dists = np.sum((zs - y_obs_2d[None, :, :]) ** 2, axis=(1, 2))  # (M,)
+        # Same distance as model.distance(): sqrt(sum_k (w_k * diff_k)^2)
+        diff = zs - y_obs_2d[None, :, :]                         # (M, K, n_obs)
+        weighted_diff = diff * weights[None, :, None]             # (M, K, n_obs)
+        dists = np.sqrt(np.sum(weighted_diff ** 2, axis=(1, 2)))  # (M,)
         best = np.argmin(dists)
         return float(r0_candidates[best]), float(dists[best]), M
 

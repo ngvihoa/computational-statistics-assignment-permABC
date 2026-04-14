@@ -275,13 +275,22 @@ def _gibbs_result_to_lightweight(locals_chain, r0_chain, eps_loc, eps_glob, time
     }
 
 
-def run_method(method_name, method_info, key, model, y_obs, args):
-    """Dispatch to the appropriate algorithm based on method type."""
+def run_method(method_name, method_info, key, model, y_obs, args,
+               epsilon_from_perm_smc=None):
+    """Dispatch to the appropriate algorithm based on method type.
+
+    Parameters
+    ----------
+    epsilon_from_perm_smc : float or None
+        Final epsilon from permABC-SMC run, used as starting epsilon for OS/UM.
+    """
     mtype = method_info['type']
+    Fi = args.final_iteration
     common_kwargs = dict(
         key=key, model=model, y_obs=y_obs,
         epsilon_target=0., n_particles=args.n_particles,
         kernel=KernelTruncatedRW, verbose=1, parallel=True,
+        Final_iteration=Fi,
     )
 
     if mtype == "perm_smc":
@@ -293,6 +302,7 @@ def run_method(method_name, method_info, key, model, y_obs, args):
             key=key, model=model, y_obs=y_obs,
             epsilon_target=0., n_particles=args.n_particles,
             kernel=KernelTruncatedRW, verbose=1,
+            Final_iteration=Fi,
         )
         return _smc_result_to_lightweight(result, method_name)
 
@@ -302,6 +312,7 @@ def run_method(method_name, method_info, key, model, y_obs, args):
             epsilon_target=0., n_particles=args.n_particles,
             kernel=KernelTruncatedRW, verbose=1,
             num_blocks_gibbs=args.num_gibbs_blocks,
+            Final_iteration=Fi,
         )
         return _smc_result_to_lightweight(result, method_name)
 
@@ -313,12 +324,10 @@ def run_method(method_name, method_info, key, model, y_obs, args):
         return _smc_result_to_lightweight(result, method_name)
 
     elif mtype == "abc_gibbs_true":
-        # True ABC-Gibbs: local distance per component, global distance for R0
         K = model.K
-        # y_obs is (1, K, n_obs) or (K, n_obs) — need (K, n_obs) for Gibbs
         y_obs_2d = np.array(y_obs).squeeze()
         if y_obs_2d.ndim == 1:
-            y_obs_2d = y_obs_2d[None, :]  # national: (1, n_obs)
+            y_obs_2d = y_obs_2d[None, :]
 
         locals_chain, r0_chain, eps_loc, eps_glob, times, n_sim_per_iter = \
             run_gibbs_sampler_sir(
@@ -333,20 +342,22 @@ def run_method(method_name, method_info, key, model, y_obs, args):
     elif mtype == "perm_smc_os":
         K = model.K
         M_0 = max(2 * K, K + 5)
+        eps_start = epsilon_from_perm_smc if epsilon_from_perm_smc is not None else np.inf
         result = perm_abc_smc_os(
             key=key, model=model, y_obs=y_obs,
             n_particles=args.n_particles, kernel=KernelTruncatedRW,
-            M_0=M_0, verbose=1, Final_iteration=10,
+            M_0=M_0, epsilon=eps_start, verbose=1, Final_iteration=Fi,
         )
         return _smc_result_to_lightweight(result, method_name)
 
     elif mtype == "perm_smc_um":
         K = model.K
         L_0 = max(1, K // 2)
+        eps_start = epsilon_from_perm_smc if epsilon_from_perm_smc is not None else np.inf
         result = perm_abc_smc_um(
             key=key, model=model, y_obs=y_obs,
             n_particles=args.n_particles, kernel=KernelTruncatedRW,
-            L_0=L_0, verbose=1, Final_iteration=10,
+            L_0=L_0, epsilon=eps_start, verbose=1, Final_iteration=Fi,
         )
         return _smc_result_to_lightweight(result, method_name)
 
@@ -378,6 +389,8 @@ def parse_arguments():
                         help='Number of prior candidates per component (local step)')
     parser.add_argument('--gibbs_M_glob', type=int, default=100,
                         help='Number of prior candidates for R0 (global step)')
+    parser.add_argument('--final_iteration', type=int, default=100,
+                        help='Final_iteration for SMC methods (continue after convergence)')
     return parser.parse_args()
 
 
@@ -430,19 +443,33 @@ def main():
         print(f"  Scale: {scale.upper()} (K={model.K})")
         print(f"{'='*60}")
 
-        for method_name in methods_to_run:
+        # Run permABC-SMC first to get its final epsilon for OS/UM
+        epsilon_from_perm_smc = None
+        ordered_methods = list(methods_to_run)
+        if "permABC-SMC" in ordered_methods:
+            ordered_methods.remove("permABC-SMC")
+            ordered_methods.insert(0, "permABC-SMC")
+
+        for method_name in ordered_methods:
             method_info = registry[method_name]
             print(f"\n--- {method_name} ---")
             t0 = _time.perf_counter()
 
             key, subkey = random.split(key)
             try:
-                lightweight = run_method(method_name, method_info, subkey, model, y_obs, args)
+                lightweight = run_method(
+                    method_name, method_info, subkey, model, y_obs, args,
+                    epsilon_from_perm_smc=epsilon_from_perm_smc,
+                )
                 elapsed = _time.perf_counter() - t0
                 print(f"  Done in {elapsed:.1f}s | N_sim={lightweight.get('total_n_sim', '?'):,} | "
                       f"eps_final={lightweight.get('final_epsilon', '?')}")
 
-                # Save lightweight pkl for figure scripts
+                # Capture permABC-SMC epsilon for OS/UM
+                if method_name == "permABC-SMC":
+                    epsilon_from_perm_smc = lightweight.get('final_epsilon', None)
+                    print(f"  -> epsilon for OS/UM: {epsilon_from_perm_smc}")
+
                 save_lightweight(lightweight, scale, method_info['tag'], common_metadata, args.results_dir)
                 all_results[(method_name, scale)] = lightweight
 
