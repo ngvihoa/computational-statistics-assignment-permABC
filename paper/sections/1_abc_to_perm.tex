@@ -10,7 +10,7 @@ The standard rejection ABC algorithm, often referred to as \emph{Vanilla ABC} (s
     \label{eqabc}
     \begin{split}
         \pi_{\varepsilon}\{\param \mid \eta(\obsdata)\} &\propto
-        \int_{\dataspace^\Clust} \pi_{\varepsilon}\{\param, \simdata \mid \eta(\obsdata)\} \, d\simdata \\\\
+        \int_{\dataspace^\Clust} \pi_{\varepsilon}\{\param, \simdata \mid \eta(\obsdata)\} \, d\simdata \\
         &\propto \pi(\param) \int_{A_{\obsdata,\varepsilon}} f(\simdata \mid \param) \, d\simdata,
     \end{split}
 \end{equation}
@@ -49,58 +49,6 @@ This naive ABC algorithm faces several limitations, including poor scalability i
     }
 \end{algorithm}
 
-
-\subsection{Motivations of permABC}
-
-A common approach in ABC to increase the acceptance rate is to exploit the exchangeability of the compartments by using a permutation-invariant summary statistic, such as the sorted vector. For instance, when we have a one-dimensional observation (or statistic) per compartment, $\obsdata \in \mathbb{R}^K$, it is natural to use the ordering $\eta(\obsdata) = \text{sort}(\obsdata)$ as a summary. This reduces the effective complexity from $K!$ permutations to a canonical representation, thereby simplifying the comparison between datasets.
-
-Moreover, in the univariate case, sorting is known to minimize the distance over all permutations of simulated data. Specifically, $d\{\text{sort}(\obsdata), \text{sort}(\simdata)\} = \min_{\sigma \in \mathcal{S}_K} d(\obsdata, \simdata_{\sigma})$, where $\mathcal{S}_K$ denotes the set of all permutations of $\{1,\dots,K\}$. This property underlies several recent developments in ABC, including those based on optimal transport and Wasserstein distances \citep{bernton2019approximate}, where sorting plays a central role in defining distances between empirical distributions.
-
-\al{This perspective is closely related in spirit to Wasserstein ABC (WABC) \citep{bernton2019approximate}, where inference is also based on a discrepancy between empirical distributions and is therefore intrinsically permutation-invariant at the data level. In WABC, however, the parameter of interest is global, and the method is designed for samples viewed as unordered point clouds. As a consequence, the issue of recovering compartment-specific local parameters is not addressed there. By contrast, our setting is hierarchical: while permutation invariance can be exploited to improve acceptance, inference ultimately concerns not only the global component \( \globparam \) but also the local parameters \( \locparam_{1:K} \), at least up to relabelling.From a computational viewpoint, \citet{bernton2019approximate} also discuss several approximations to exact optimal transport in the multivariate case, including entropically regularized Sinkhorn divergences, Hilbert-curve sorting, and a greedy swapping refinement initialized from the Hilbert ordering. Using their notation, their sample size \(n\) corresponds here to the number \(K\) of compartments, whereas their observation dimension \(d_y\) corresponds to the dimension of each compartment-level observation. These approximations are particularly attractive when the number of points is very large, but the Hilbert-based approximation is reported to be accurate mainly for small observation dimension and to deteriorate as \(d_y\) grows. In our applications, \(K\) is only moderately large---with a limiting case around \(K=100\), which already corresponds to the scale at which WABC considers the number of data points---while the dimension of each compartment-level observation may be non-negligible. In this regime, approximate transport schemes can lose accuracy quickly, and solving the assignment problem exactly remains a practical and robust option.}
-
-However, this elegant result no longer holds in the multivariate case. When each $\obsdata_k$ is a vector in $\mathbb{R}^n$ with $n > 1$, there is no natural way to define a deterministic and permutation-optimal ordering. As a result, we cannot rely on sorting to minimize $d(\obsdata, \simdata_{\sigma})$ in general, and alternative strategies are needed as soon as the dimension is at least 2. Instead, we are compelled to solve the optimization problem directly, which leads us to the following permABC acceptance criterion:
-
-\begin{equation}
-    \label{eqopti}
-    \min_{\sigma \in \mathcal{S}_K} d(\obsdata, \simdata_{\sigma}) \leq \varepsilon.
-\end{equation}
-
-This condition can be interpreted as accepting if our simulated dataset $\simdata$ matches, up to a permutation, the observed dataset $\obsdata$, and it effectively enhances the acceptance rate by a factor of $K!$ when $\varepsilon$ is small. This optimization task can be formulated as a two-dimensional linear assignment problem, or equivalently a bipartite matching problem, and is efficiently solved using a modified Jonker–Volgenant algorithm \citep{jonker1987shortest}, with a computational complexity of $\mathcal{O}(K^3)$ \citep{crouseImplementing2DRectangular2016a}.
-While this reduces the combinatorial cost from $K!$ to polynomial time, the $\mathcal{O}(K^3)$ complexity remains substantial. Nevertheless, it makes problems with up to $K = 100$ compartments tractable in practice (see the real-world application in Section~\ref{sec:sir}).
-
-
-However, this approach does not yield samples from the pseudo-posterior defined in \eqref{eqabc}, but rather from the following permutation-invariant version:
-
-\begin{equation} 
-    \label{eqpermabc_tilde}
-    \begin{split}
-        \Tilde \pi_{\varepsilon} (\param \mid \obsdata)  & \propto \int_{\dataspace^K} \Tilde \pi_{\varepsilon} (\param , \simdata \mid \obsdata) \, d\simdata \\
-        & \propto \pi(\param) \int_{\Tilde A_{\obsdata,\varepsilon}} f(\simdata \mid \param) \, d\simdata,
-    \end{split}
-\end{equation}
-where the acceptance region is defined as
-\[
-\tilde{A}_{\obsdata,\varepsilon} = \left\{\simdata \in \dataspace^K \,\middle|\, \min_{\sigma \in \mathcal{S}_K} d(\obsdata, \simdata_{\sigma}) \leq \varepsilon \right\} = \bigcup_{\sigma \in \mathcal{S}_K} B_{\varepsilon}(\obsdata_{\sigma}),
-\]
-with \( B_{\varepsilon}(\obsdata_{\sigma}) \) denoting the \( \varepsilon \)-ball centered at \( \obsdata_{\sigma} \) for the distance \( d \).
-
-In this formulation, the likelihood \( f(\obsdata \mid \param) \) is approximated by its integral over a neighborhood of all permutations of the observed dataset:
-\[
-\int_{\tilde{A}_{\obsdata,\varepsilon}} f(\simdata \mid \param) \, d\simdata \approx \sum_{\sigma \in \mathcal{S}_K} f(\obsdata_{\sigma} \mid \param).
-\]
-% Accordingly, the resulting pseudo-posterior approximates a mixture of posterior distributions across all permutations:
-% \[
-% \Tilde \pi_{\varepsilon}(\param \mid \obsdata) \approx \sum_{\sigma \in \mathcal{S}_K} \pi(\param \mid \obsdata_{\sigma}) = \sum_{\sigma \in \mathcal{S}_K} \pi(\param_{\sigma} \mid \obsdata).
-% \]
-
-Inference in this setting targets the global parameter \( \globparam \), but is only defined up to a permutation of the local components \( \locparam_{1:K} \), effectively yielding posterior samples of the form \( \Tilde{\param} = (\globparam, \{\locparam_1, \dots, \locparam_K\})\),
-where the local parameters are treated as an unordered set. This formulation is particularly suitable when the local parameters are considered nuisance variables, as in many hierarchical modeling contexts. We discuss below how to recover a pseudo-posterior of each $\mu_k$ if needed.
-
-To our knowledge, this permutation-based version of ABC has not been formally studied in the literature. We therefore introduce a novel methodology, termed \emph{permABC}, which builds upon this idea while addressing its limitations. In particular, our method enables proper inference over the full parameter vector \( \param \), including the ordering of local components, even in regimes where \( K \) is large, and does so while preserving a high acceptance rate.
-
-
-
-% \xian{ça sonne comme si la méthode existait déjà, mais alors faudrait une ref...}
 
 \subsection{Motivations of permABC}
 
@@ -220,7 +168,7 @@ The \emph{permABC} algorithm (see Algorithm~\ref{alg:permABC_star}) therefore de
 The permABC method introduced in the previous section (Algorithm~\ref{alg:permABC_star}) differs from standard ABC in a key aspect: instead of accepting all permutations that satisfy the ABC criterion, it retains only the optimal one—namely, the permutation that minimizes the discrepancy defined in Equation~\eqref{eqopti}. This choice, motivated by computational efficiency, alters the pseudo-posterior distribution by constraining the pseudo-data to lie within $\dataspace^{*K}_{\obsdata}$, as previously described.
 
 
-In contrast, a variant equivalent to standard ABC would consist in uniformly sampling a permutation among those satisfying the ABC acceptance condition and appropriately reweighting the contribution of each accepted sample by the size of this set. However, enumerating this set incurs a prohibitive $K!$ computational complexity. In Appendix~\ref{appendix_secstrat}, we propose a stratified sampling strategy—termed \emph{permABC-strat}—to efficiently estimate this cardinality and recover the standard pseudo-posterior.
+In contrast, a variant equivalent to standard ABC would consist in uniformly sampling a permutation among those satisfying the ABC acceptance condition and appropriately reweighting the contribution of each accepted sample by the size of this set. However, enumerating this set incurs a prohibitive $K!$ computational complexity. In Appendix~\ref{sec:appendix_strat}, we propose a stratified sampling strategy—termed \emph{permABC-strat}—to efficiently estimate this cardinality and recover the standard pseudo-posterior.
 
 To clarify the connection between permABC and standard ABC, we establish a sufficient condition under which both methods coincide. Specifically, we prove that when the tolerance $\varepsilon$ is small enough, the set of permutations satisfying the ABC criterion contains at most one element. We formalize this in the following lemma:
 

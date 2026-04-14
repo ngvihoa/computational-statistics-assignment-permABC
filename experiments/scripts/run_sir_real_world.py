@@ -154,10 +154,11 @@ def focus_first_wave(I_obs_fr, I_obs_reg, I_obs_dep, date, n_day=120):
     return I_obs_fr_V1, I_obs_reg_V1, I_obs_dep_V1, date_V1
 
 
-def setup_models(I_obs_fr_V1, I_obs_reg_V1, I_obs_dep_V1, reg_list, dep_list, reg_pop, dep_pop, n_day):
+def setup_models(I_obs_fr_V1, I_obs_reg_V1, I_obs_dep_V1, reg_list, dep_list, reg_pop, dep_pop, n_day, sigma=0.05):
     """Setup SIR models for different scales."""
     params = {'low_I': 0.1, 'high_I': 2000, 'low_R': 0.1, 'high_R': 2000,
-              'low_gamma': 0.05, 'high_gamma': 4.0, 'low_r0': 0.5, 'high_r0': 4.0, 'n_pop': 100000}
+              'low_gamma': 0.05, 'high_gamma': 4.0, 'low_r0': 0.5, 'high_r0': 4.0, 'n_pop': 100000,
+              'sigma': sigma}
 
     mod_fr = SIR_real_world(K=1, n_obs=n_day, **params)
     y_obs_fr = I_obs_fr_V1[None, None, :]
@@ -185,7 +186,9 @@ def save_lightweight(result, scale, method_tag, metadata, results_dir):
     os.makedirs(results_dir, exist_ok=True)
 
     seed = metadata.get('seed', 'unknown')
-    file_path = os.path.join(results_dir, f"inference_sir_{scale}_{method_tag}_seed_{seed}.pkl")
+    sigma = metadata.get('sigma', 0.05)
+    sigma_str = f"_sigma_{sigma:.3f}".replace('.', 'p')
+    file_path = os.path.join(results_dir, f"inference_sir_{scale}_{method_tag}{sigma_str}_seed_{seed}.pkl")
 
     with open(file_path, "wb") as f:
         pickle.dump(result, f)
@@ -407,6 +410,8 @@ def parse_arguments():
                         help='Number of prior candidates for R0 (global step)')
     parser.add_argument('--final_iteration', type=int, default=100,
                         help='Final_iteration for SMC methods (continue after convergence)')
+    parser.add_argument('--sigma', type=float, default=0.05,
+                        help='Process noise sigma for SIR log-normal multiplicative noise')
     return parser.parse_args()
 
 
@@ -423,7 +428,8 @@ def main():
     I_obs_fr, I_obs_reg, I_obs_dep, date, dep_list, reg_list = load_hospitalization_data(data_dir, dep_pop, dep_reg, reg_pop)
     I_obs_fr_V1, I_obs_reg_V1, I_obs_dep_V1, date_V1 = focus_first_wave(I_obs_fr, I_obs_reg, I_obs_dep, date, args.n_day)
     (mod_fr, y_obs_fr), (mod_reg, y_obs_reg), (mod_dep, y_obs_dep) = setup_models(
-        I_obs_fr_V1, I_obs_reg_V1, I_obs_dep_V1, reg_list, dep_list, reg_pop, dep_pop, args.n_day)
+        I_obs_fr_V1, I_obs_reg_V1, I_obs_dep_V1, reg_list, dep_list, reg_pop, dep_pop, args.n_day,
+        sigma=args.sigma)
 
     scales_map = {
         "national": (mod_fr, y_obs_fr),
@@ -448,6 +454,7 @@ def main():
     key = random.PRNGKey(args.seed)
     common_metadata = {
         'seed': args.seed, 'n_particles': args.n_particles, 'n_day': args.n_day,
+        'sigma': args.sigma,
         'dep_list': dep_list, 'reg_list': reg_list, 'dep_name': dep_name, 'reg_name': reg_name,
     }
 

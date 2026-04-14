@@ -44,46 +44,6 @@ where \( \mathcal{A}_K^M \) denotes the set of injections from \( \{1, \dots, K\
 
 We slightly abuse notation by denoting \( f \) the joint simulator over compartments, regardless of whether the number of compartments is \( K \) (observed) or \( M \) (simulated). This is justified since the simulator is defined componentwise via a common mechanism \( g \), applied independently to each compartment: formally, \( f(\simdata \mid \param) := \prod_{m=1}^M g(z_m \mid \globparam, \locparam_m) \).
  
-
-
-Analogously to the case \( M = K \), this procedure defines a pseudo-posterior distribution \( \tilde{\pi}_\varepsilon^M(\cdot \mid \obsdata) \), and its projected version \( \pi_\varepsilon^{*M}(\cdot \mid \obsdata) \), which is obtained by applying the optimal partial permutation minimizing \eqref{eq:os} in a reasoning analogous to that of Section~\ref{secabc_to_permabc} (see Appendix~\ref{appendix_os} for details).
-
-Interestingly, the marginals in $\globparam$ and $\locparam$ exhibit contrasting behaviors as $M$ varies. When $M$ is large, the acceptance condition becomes easier to satisfy regardless of the value of $\varepsilon$, leading to a joint pseudo-posterior distribution close to the prior. Since the permutation only affects the local parameters, the marginal over $\globparam$ remains nearly unchanged, and therefore close to its prior distribution. In contrast, the marginal over the local parameters becomes more concentrated. This is because, when $M$ is large, the optimization in \eqref{eq:os} explores a wider set of potential matches, and the local parameters $\locparam_{1:K}$ corresponding to the best matching compartments are those that generate data most similar to $\obsdata$ under a given $\globparam$. As a result, these local components become tightly clustered around values that are locally optimal with respect to the matching criterion. As $M$ decreases toward $K$, this concentration fades, and the marginal over $\locparam$ gradually approaches the full permABC pseudo-posterior. This behavior is illustrated in Figure~\ref{fig:os}, and further discussed in Appendix~\ref{appendix_os}.
-
-This new distribution family is particularly appealing, as it introduces a natural sequence of auxiliary distributions that converge to the target distribution \( \pi_\varepsilon^*(\cdot \mid \obsdata) \). We define a decreasing sequence \( M_0 > M_1 > \cdots > M_T = K \), keeping \( \varepsilon \) fixed, such that the acceptance condition \eqref{eq:os} becomes increasingly selective until it recovers the standard permABC criterion \eqref{eqopti} when \( M = K \). 
-To navigate this sequence \( \left \{\tilde{\pi}_\varepsilon^{M_t}, t = 0, \dots, T \right\} \), we adapt the ABC-SMC framework of \citet{delmoralAdaptiveSequentialMonte2012}, as discussed in Section~\ref{sec:abc_smc}. At each stage, we apply the optimal partial permutation \( \sigma^* \) to each accepted particle to obtain a sample from \( \pi_\varepsilon^*(\cdot \mid \obsdata) \). This results in a new algorithm we call \emph{permABC-Over-Sampling (permABC-OS)}.
-
-This method  allows convergence to the target distribution in a reduced number of iterations. However, it also introduces several challenges that we now discuss. The first requirement for the success of the method is to initialize the algorithm with a sufficiently large and diverse population of accepted particles. To achieve this, one must choose $M_0$ and $\varepsilon$ in a coordinated manner. Specifically, since the minimum in \eqref{eq:os} decreases with $M$, a smaller value of $\varepsilon$ necessitates a larger $M_0$ in order to maintain a reasonable acceptance rate at the first iteration. In Appendix~\ref{appendix_os}, we propose a method to calibrate $\varepsilon$ as a function of $M_0$, thereby allowing users to set $M_0$ under a fixed simulation budget.
-
-A second challenge attached to this method is the risk of extinction of the particle population during the sequential iterations. Specifically, when transitioning from population $t$ with $M_t$ compartments to population $t+1$ with $M_{t+1} < M_t$, the acceptance condition \eqref{eq:os} is evaluated on a reduced subset of simulated compartments. If compartments that previously matched observed ones are no longer considered, the particle may be rejected—even though it was previously accepted. To mitigate this, the sequence $M_t$ must be selected carefully. We provide a practical heuristic for this in Appendix~\ref{appendix_os}. 
-
-Even under a careful design of the sequence $M_t$, a large portion of the population may be lost in this transition. To address this issue, we introduce a duplication mechanism whereby each particle is replicated across multiple random permutations. This increases the probability that at least one version of the particle survives the next acceptance test, without requiring additional simulations. The duplication strategy, along with heuristic guidelines for both selecting the sequence \( (M_t) \) and tuning \( \varepsilon \), is also detailed in Appendix~\ref{appendix_os}. 
-
-
-
-
-\begin{figure}[htbp]
-    \centering
-    \includegraphics[scale=.5]{fig/fig2.pdf}
-    \caption{Evolution of the pseudo-posterior \( \pi_\varepsilon^{*M} \) as \( M \) decreases from \( M_0 = 150 \) (yellow) to \( M_T = K = 10 \) (purple) for a Gaussian toy model.}
-    \label{fig:os}
-\end{figure}
-
-
-
-\subsection{NEW: Over-Sampling}
-\label{sec:permABC_OS}
-The Over-Sampling strategy leverages the flexibility of the permABC framework to sample more efficiently from the target pseudo-posterior \( \pi_\varepsilon^*(\cdot \mid \obsdata) \) by simulating more compartments than are present in the observed data. Specifically, instead of generating \( K \) pseudo-compartments, we simulate \( M > K \) compartments: that is, we consider \( \simdata \in \dataspace^M \) while the observed data remain in \( \dataspace^K \). We then accept or reject based on the best simulated subset of size $K$.
-
-To implement this strategy, we draw \( \param = (\globparam, \locparam_1, \dots, \locparam_M) \sim \pi(\cdot) \), simulate the corresponding data \( \simdata = (z_1, \dots, z_M) \sim f(\cdot \mid \param) \), and use the following acceptance condition:
-\begin{equation}
-    \label{eq:os}
-    \min_{\sigma \in \mathcal{A}_K^M} d(\obsdata, \simdata_{\sigma}) \leq \varepsilon,
-\end{equation}
-where \( \mathcal{A}_K^M \) denotes the set of injections from \( \{1, \dots, K\} \) to \( \{1, \dots, M\} \), i.e., the set of partial \( K \)-permutations of \( \{1, \dots, M\} \). As in \eqref{eqopti}, this optimization problem can be solved efficiently using the same assignment algorithm with computational complexity \( \mathcal{O}(K^2 M) \) \citep{crouseImplementing2DRectangular2016a}.
-
-We slightly abuse notation by denoting \( f \) the joint simulator over compartments, regardless of whether the number of compartments is \( K \) (observed) or \( M \) (simulated). This is justified since the simulator is defined componentwise via a common mechanism \( g \), applied independently to each compartment: formally, \( f(\simdata \mid \param) := \prod_{m=1}^M g(z_m \mid \globparam, \locparam_m) \).
- 
 Analogously to the case \( M = K \), this procedure defines a pseudo-posterior distribution \( \tilde{\pi}_\varepsilon^M(\cdot \mid \obsdata) \), and its projected version \( \pi_\varepsilon^{*M}(\cdot \mid \obsdata) \), which is obtained by applying the optimal partial permutation minimizing \eqref{eq:os} in a reasoning analogous to that of Section~\ref{secabc_to_permabc} (see Appendix~\ref{appendix_os} for details).
 
 \new{More precisely, Over-Sampling can be viewed as a pushforward construction. Let \( \sigma^*=\sigma^*(\param,\simdata,\obsdata) \in \arg\min_{\sigma \in \mathcal{A}_K^M} d(\obsdata,\simdata_\sigma) \), using any measurable tie-breaking rule, and define the matching map}

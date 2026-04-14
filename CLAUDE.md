@@ -138,135 +138,127 @@ Key models:
 ### JAX Usage
 The codebase uses JAX with 64-bit precision enabled. JIT-compiled functions appear throughout. `Theta` is registered as a JAX pytree so it passes through `jit`/`vmap`/`lax.scan`.
 
-## TODO — Resubmission after Biometrika rejection
+## TODO — Resubmission (target: JASA)
 
-Paper: `paper/permABC.tex` | Reviews: `paper/reject_letter.tex`
+Paper: `paper/resubmission.tex` (modulaire, \input{sections/...})
+Archive Biometrika: `paper/biometrika.tex`
+Reviews Biometrika: `paper/reject_letter.tex`
+Mock review JASA: `paper/review_jasa_mock.tex`
 
-TODO — Resubmission permABC (priorisée)
+### Etat au 14 avril 2026
 
-[PRIORITÉ 1 — indispensable avant resoumission]
+FAIT :
+- [x] 1. SIR stochasticite : formule log-normal ajoutee dans 3_numerical.tex
+- [x] 2. Wasserstein multivarie : paragraphe WABC ajoute dans 1_abc_to_perm.tex (\new{})
+- [x] 6. Pushforward OS : formalisme + M->inf dans 2_sequential.tex (\new{})
+- [x] 8a. Doublons supprimes (2x Motivations, 2x Over-Sampling, 2x SIR)
+- [x] 8b. Labels fixes (sec:gaussian_toy, appendix_secstrat, eq (1) \\\\)
+- [x] 8c. Typo abstract (“Recovered”)
+- [x] SIR v2 : reecriture prudente avec mention misspecification
+- [x] resubmission.tex modulaire fonctionnel (compile, 40 pages, 0 erreurs)
 
-1. SIR stochasticity
-- Mentionner explicitement dans le papier que le modèle SIR utilisé en ABC est stochastique.
-- Décrire clairement le bruit multiplicatif log-normal déjà présent dans le simulateur.
-- Vérifier que cette précision apparaisse :
-  - dans la section modèle,
-  - dans la section expérience réelle,
-  - et dans la légende / commentaire associé si nécessaire.
+RESTE A FAIRE :
 
-2. Corriger le passage sur Wasserstein multivarié
-- Supprimer toute affirmation disant que Wasserstein ne s’applique pas au cas multivarié.
-- Expliquer correctement le lien avec WABC :
-  - permutation-invariance au niveau des compartiments,
-  - différences de cible statistique,
-  - différence entre paramètres globaux et paramètres locaux.
-- Ajouter une comparaison conceptuelle propre avec Hilbert / Sinkhorn / exact assignment.
+[PRIORITE 1 — bloquant pour soumission JASA]
 
-3. Clarifier la Figure 2 (Over-Sampling)
-- Expliquer pourquoi la prior peut sembler plus concentrée que la pseudo-postérieure pour certains panneaux.
-- Ajouter une lecture “unprojected vs projected posterior”.
-- Appuyer cette clarification par le toy model gaussien si possible.
+1. **Metriques de qualite posterieure** (mock review M1, ancien point 12)
+   - Ajouter KL marginale, W2, ou couverture sur le toy Gaussian (posterieure en forme close disponible).
+   - Remplacer ou completer les figures epsilon-vs-cost par des figures metrique-vs-cost.
+   - Le code des metriques (sw2_joint, kl_mu_avg, w2_sigma2, w2_mu_avg) existe deja dans diagnostics.py.
+   - 2 pickles outliers_4 restent a reprocesser (voir memoire project_resume_point.md).
 
-4. Comparaison avec ABC-SMC standard
-- Ajouter une baseline explicite avec suite classique d’epsilons décroissants.
-- Répondre clairement dans le texte à la question :
-  “pourquoi Over-Sampling / Under-Matching plutôt qu’une simple suite standard de seuils ?”
-- Expliquer que OS/UM sont des distributions de bridging complémentaires, pas un remplacement d’ABC-SMC standard.
+2. **Baseline ABC-SMC standard sans permutations** (mock review M2, ancien point 4)
+   - Ajouter ABC-SMC (Del Moral 2012) sans permutation dans les benchmarks.
+   - Permet d’isoler le gain des permutations vs. le gain du cadre SMC.
+   - Code : `abc_smc` existe deja dans `permabc/algorithms/smc.py`.
 
-5. Intégrer les asymptotiques dans le main text
-- Ne pas laisser asymptotics.tex isolé.
-- Ajouter une sous-section courte dans le papier principal.
-- Y inclure au minimum :
-  - lien permABC / WABC au niveau compartiment,
-  - interprétation asymptotique en K grand,
-  - résultat principal sur Over-Sampling quand M tend vers l’infini.
+3. **Integrer asymptotics.tex** (mock review M4, ancien point 5)
+   - Le contenu est pret dans `paper/sections/asymptotics.tex`.
+   - Decider : sous-section du main text ou appendice ?
+   - Contient : lien WABC, K->inf, M->inf, concentration locaux, non-commutation des limites.
+   - Formaliser les resultats M->inf de la Section 2.3 comme Propositions (pas juste des equations \new{}).
 
-6. Résultat théorique propre sur Over-Sampling
-- Formaliser Over-Sampling comme pushforward.
-- Distinguer clairement :
-  - loi non projetée,
-  - loi projetée.
-- Montrer que, sous condition de support / faisabilité,
-  la marginale en beta tend vers la prior quand M tend vers l’infini.
-- Expliquer que les paramètres locaux projetés restent concentrés autour des meilleurs matches.
+4. **Theorem 1 : attenuer ou etendre** (mock review M3, ancien point 7)
+   - Option A : borne a epsilon fini sur TV(pi*, pi).
+   - Option B : reformulation plus prudente + discussion explicite de la limitation.
+   - Supprimer “at no cost to theoretical consistency” si on ne peut pas le prouver pour epsilon fini.
 
-7. Lemma 1 / Theorem 1
-- Soit étendre proprement le résultat au cas avec matches exacts / epsilon*,
-- soit reformuler le résultat de manière plus prudente si l’extension est trop lourde.
-- Ne pas laisser ce point ambigu.
+5. **Validation SIR sur donnees synthetiques** (mock review M5)
+   - Generer des donnees SIR synthetiques a parametres connus.
+   - Montrer que permABC retrouve les vrais parametres.
+   - Ajouter posterior predictive checks sur les vraies donnees.
+   - Justifier le choix sigma=0.05 (sensibilite ?).
 
-8. Nettoyage final du manuscrit
-- Supprimer toutes les traces \new{}, \old{}, commentaires auteurs, passages doublonnés.
-- Vérifier que toutes les sections utilisées sont bien incluses dans le main tex.
-- Harmoniser notations, labels, renvois, appendices et figures.
+6. **Resoudre les \old{} / \new{} restants**
+   - 1_abc_to_perm.tex : 3 blocs \old{} (phrases barrees a accepter ou rejeter).
+   - 2_sequential.tex : 1 gros bloc \old{} (ancien texte informel OS).
+   - Decider pour chaque : on accepte la suppression et on enleve le markup.
 
+[PRIORITE 2 — forte valeur ajoutee]
 
-[PRIORITÉ 2 — forte valeur ajoutée si coût raisonnable]
+7. **Texte introductif Section 2** (mock review m1)
+   - Ajouter un paragraphe chapeau entre \section{Sequential...} et \subsection{State of the art}.
 
-9. Petit benchmark WABC / Hilbert / LSA exact
-- Ajouter un benchmark ciblé sur le toy Gaussian.
-- Montrer :
-  - cas où permABC et WABC coïncident,
-  - coût exact vs approximation,
-  - régime où LSA exact reste raisonnable pour K modéré.
+8. **Specifier les hyperparametres du Gaussian toy** (mock review m2)
+   - Donner (a, b, s, n, K) dans le texte ou en legende de figure.
 
-10. Exemple explicite “WABC = permABC”
-- Ajouter un exemple / proposition simple où les deux approches sont équivalentes.
-- L’utiliser pour renforcer le positionnement théorique du papier.
+9. **Discuter Figure 2 a la lumiere de M->inf** (mock review m3)
+   - Pointer explicitement sur la figure le comportement prior-like de beta et la concentration des locaux.
+   - Regenerer la figure si les parametres ont change (prior plus vague, epsilon plus serre).
 
-11. Commentaire sur la portée générale des idées séquentielles
-- Ajouter un paragraphe expliquant que les idées de OS / UM / kernels peuvent s’étendre au-delà du cadre strict d’ABC hiérarchique.
-- Rester bref mais explicite.
+10. **Comparaison equilibree avec ABC-Gibbs** (mock review m4)
+    - Ajouter un cas ou ABC-Gibbs marche bien (Gaussian toy standard, dependances faibles).
 
-12. Métriques de qualité postérieure
-- Ajouter une ou deux métriques de qualité au-delà de epsilon.
-- Priorité à une métrique jointe robuste :
-  - sliced Wasserstein, ou
-  - score joint bien interprété,
-  - plus métriques marginales si utile.
-- Ne pas surcharger les figures.
+11. **Desambiguer la notation M** (mock review m6)
+    - Section 2.1 : M = nb datasets par parametre. Section 2.3 : M = nb compartiments simules.
+    - Renommer l’un des deux.
 
+12. **Reporter ou utiliser le “unique particle rate”** (mock review m7)
+    - Soit l’utiliser dans les experiences, soit supprimer la discussion.
 
-[PRIORITÉ 3 — à repousser sauf si tout le reste est fini]
+13. **Benchmark cout computationnel assignment** (mock review m8)
+    - Pour K=94 : fraction du temps dans l’assignment vs. simulation.
 
-13. Nouveaux modèles épidémiques complexes
-- Reporter SEIHR / modèles plus riches à plus tard.
-- Ne pas refaire toute la section réelle avant la resoumission.
+14. **Petit benchmark WABC / Hilbert / LSA** (ancien point 9)
+    - Sur le toy Gaussian : cas ou permABC = WABC, cout exact vs approx.
 
-14. Nouveau schéma de bruit SIR
-- Ne pas changer le modèle bruité actuel tant que la version existante n’est pas clairement documentée.
+15. **Exemple explicite “WABC = permABC”** (ancien point 10)
+    - Proposition simple ou les deux coincident.
 
-15. ABC-Gibbs sur modèles lourds
-- Reporter les expériences ABC-Gibbs sur SIR / SEIHR.
-- Trop coûteux pour un gain de resoumission incertain.
+16. **Mettre a jour conclusion et abstract**
+    - Mentionner les resultats asymptotiques, le lien WABC, le pushforward OS.
 
-16. Multiplication des exemples LFI
-- Ne pas viser 3 à 5 nouveaux exemples.
-- Mieux vaut un ou deux ajouts très ciblés et propres qu’un élargissement massif.
+[PRIORITE 3 — reporter sauf si tout le reste est fini]
 
-17. Refonte complète des figures epsilon -> KL
-- Ne pas tout remplacer.
-- Ajouter des métriques complémentaires seulement si elles clarifient vraiment l’histoire.
+17. Nouveaux modeles epidemiques (SEIHR etc.)
+18. Nouveau schema de bruit SIR
+19. ABC-Gibbs sur modeles lourds
+20. Multiplication des exemples LFI
 
+[PLAN D’EXECUTION]
 
-[PLAN D’EXÉCUTION CONSEILLÉ]
+Etape A — Numerique
+- Reprocesser les 2 pickles outliers_4
+- Ajouter ABC-SMC standard dans les benchmarks
+- Generer figures avec metriques de qualite (KL, W2)
+- Validation SIR synthetique
 
-Étape A
-- Corriger SIR
-- Corriger Wasserstein
-- Clarifier Figure 2
-- Nettoyer le manuscrit
+Etape B — Theorie
+- Integrer asymptotics.tex (section ou appendice)
+- Formaliser les Propositions M->inf dans Section 2.3
+- Reviser Theorem 1 (attenuer ou etendre)
 
-Étape B
-- Intégrer asymptotiques dans le papier
-- Ajouter résultat Over-Sampling M -> inf
-- Réviser Lemma 1 / Theorem 1
+Etape C — Redaction
+- Resoudre tous les \old{}/\new{}
+- Texte introductif Section 2
+- Hyperparametres Gaussian toy
+- Discussion Figure 2
+- Desambiguer notation M
+- Mettre a jour abstract + intro + conclusion
 
-Étape C
-- Ajouter baseline ABC-SMC standard
-- Ajouter petit benchmark WABC / Hilbert / LSA
-- Réviser abstract + introduction + conclusion pour refléter le nouveau positionnement
-
-Étape D
-- Relecture complète style / cohérence / figures / appendices
-- Préparer version resoumission propre
+Etape D — Finition
+- Relecture complete style / coherence
+- Unique particle rate : utiliser ou supprimer
+- Benchmark cout assignment
+- Comparaison equilibree ABC-Gibbs
+- Preparer version soumission propre (supprimer \new{}/\old{} definitions)

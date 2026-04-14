@@ -24,7 +24,7 @@ Note that, even in its vanilla form, permABC offers a significant gain in simula
     \label{fig:unif}
 \end{figure}
 \subsection{Challenges of High-Dimensional ABC: A Gaussian Toy Model}
-\label{sec:sec:gaussian_toy}
+\label{sec:gaussian_toy}
 We now consider a classical hierarchical model commonly used in the Bayesian literature:
 \begin{equation*}
     \label{eqgauss}
@@ -117,49 +117,6 @@ A complementary figure reporting the number of simulations (instead of runtime) 
 \subsection{Application to Real Data: The SIR Model}
 \label{sec:sir}
 
-In this final section, we demonstrate the applicability of our methodology on real-world data by analysing the early spread of COVID-19 in France, using publicly available hospitalization records from Santé publique France \citep{DataCovid}. The dataset provides daily counts of hospital admissions at various geographic levels. We focus on mainland France (excluding overseas territories and Corsica) resulting in 94 departmental trajectories of infected individuals.
-
-To model the epidemic dynamics, we use the classical Susceptible–Infectious–Recovered (SIR) model, governed by the following system of ordinary differential equations:
-\begin{equation}
-    \label{eqSIR}
-    \begin{split}
-        \frac{dS}{dt} &= -\delta \frac{SI}{N},\\
-        \frac{dI}{dt} &= \delta \frac{SI}{N} - \nu I,\\
-        \frac{dR}{dt} &= \nu I,
-    \end{split}
-\end{equation}
-where \( S \), \( I \), and \( R \) represent the numbers of susceptible, infectious, and recovered individuals, respectively. The parameters \( \delta \) and \( \nu \) denote the transmission and recovery rates, and the basic reproduction number is defined as \( R_0 = \delta / \nu \). 
-To mitigate confounding factors such as viral mutations or heterogeneous regional interventions, we restrict our analysis to the first wave of the epidemic, from March to July 2020. During this early stage, the virus strain and public health policies were relatively homogeneous across the country, justifying a simplified hierarchical modeling approach.
-
-
-Initial explorations of the data (see Appendix~\ref{appendix_sir_validation}) suggest that the reproduction number \( R_0 \) is shared across all departments: we treat it as a global parameter. Each department \( k =  1, \dots, 94 \) is associated with local parameters \( \locparam_k = (I_k(0), R_k(0), \delta_k) \), describing the initial conditions and the local transmission rate. This formulation naturally fits within the permABC framework, with exchangeability and conditional independence across geographic compartments. When defining the distance between observed and simulated data (see \eqref{eqdistance}), the weights \( w_k \) may optionally be chosen proportional to the population of each department, to account for the relative importance of each trajectory.
-
-This epidemiological context was our original motivation for developing the permABC methodology. It exemplifies a setting where classical ABC approaches often fail due to identifiability issues and the lack of permutation invariance. Our framework was specifically designed to address these challenges in a scalable and robust manner.
-
-Full Bayesian inference at the departmental level leads to a high-dimensional parameter space: with \( K = 94 \) compartments, three local parameters per compartment, and a single global parameter \( R_0 \), the total dimension reaches \( d = 3 \times 94 + 1 = 283 \). Such settings are intractable for standard ABC methods, even in their sequential variants, due to the curse of dimensionality and inefficient exploration. 
-In contrast, permABC-SMC enables efficient inference in this setting, especially when combined with the independent-proposal Metropolis-within-Gibbs kernels introduced in Section~\ref{sec:kernels}. It captures both global trends and local heterogeneity, allowing joint inference across all departments while preserving precision on the global reproduction number.
-
-Figure~\ref{fig_SIR_posterior} illustrates this advantage by comparing the posterior distributions of \( R_0 \) obtained using either aggregated national data or the full set of departmental trajectories. When using national data, the inference yields flatter posteriors due to the loss of spatial information. In contrast, the posterior obtained via permABC-SMC using all departmental data is significantly more concentrated, highlighting the benefits of hierarchical and permutation-aware inference. This improvement stems from the model’s ability to match each trajectory with different local parameters \( \mu_k \). These local heterogeneities are visualized on the right panel of Figure~\ref{fig_SIR_posterior}, and also mapped geographically in Figure~\ref{fig_SIR_map}.
-
-However, the SIR model remains a simplified representation of epidemic dynamics, and is naturally misspecified when applied to complex real-world trajectories. This results in posterior estimates of the recovery rate \( \nu_k \) that can reach values as high as 4, which are not epidemiologically plausible given that \( \nu \) is a rate that should not typically exceed 1. This limitation illustrates the trade-off between model simplicity and fidelity in real-data applications.
-
-\begin{figure}[htbp]
-    \centering
-    \includegraphics[scale=.5]{fig/fig7_posterior_comparison_seed_42.pdf}
-    \caption{Posterior approximation for the global \(R_0\) parameter and the local recovery rates \(\nu_k\) in the hierarchical SIR model described in \(\eqref{eqSIR}\), where \(R_0 = \delta / \nu\). The inference is performed using departmental-level data (\( K = 94 \) in blue) or national-level aggregation (\(K = 1\) in red).}
-    \label{fig_SIR_posterior}
-\end{figure}
-
-\begin{figure}[htbp]
-    \centering
-    \includegraphics[scale=.5]{fig/fig8_map_departmental_seed_42.pdf}
-    \caption{Map of the posterior mean estimates of the local recovery rate \(\nu_k\) for each department.}
-    \label{fig_SIR_map}
-\end{figure}
-
-\subsection{Application to Real Data: The SIR Model}
-\label{sec:sir}
-
 In this final section, we illustrate the applicability of our methodology on real-world data by analysing the early spread of COVID-19 in France using publicly available hospitalization records from Santé publique France \citep{DataCovid}. The dataset provides daily hospital admissions at several geographic levels. We focus on mainland France (excluding overseas territories and Corsica), which yields 94 departmental time series.
 
 To describe the epidemic dynamics, we use a classical Susceptible--Infectious--Recovered (SIR) model, defined through the latent system of ordinary differential equations
@@ -173,7 +130,11 @@ To describe the epidemic dynamics, we use a classical Susceptible--Infectious--R
 \end{equation}
 where \(S\), \(I\), and \(R\) denote the numbers of susceptible, infectious, and recovered individuals, respectively, \(N\) is the population size, and \(\delta\) and \(\nu\) are the transmission and recovery rates. The corresponding basic reproduction number is \(R_0 = \delta / \nu\).
 
-Since the available data consist of hospital admissions rather than direct observations of the infectious compartment, the ODE system defines only a latent epidemic trajectory. To obtain simulated datasets, we therefore combine the SIR dynamics with an observation model linking the latent trajectory to the observed admissions. In particular, conditional on the latent trajectory, the observed daily counts are generated through a noisy observation layer, so that the simulated data entering the ABC distance are random even when the latent SIR dynamics are deterministic. This distinction is important here, as ABC is applied to simulated observations rather than to the deterministic ODE solution itself.
+Since the available data consist of hospital admissions rather than direct observations of the infectious compartment, the ODE system defines only a latent epidemic trajectory. To obtain simulated datasets, we combine the SIR dynamics with a stochastic observation model. Specifically, the transmission rate at each sub-daily time step is perturbed by a multiplicative log-normal noise:
+\[
+\delta_k^{(t)} = \delta_k \cdot \exp(\sigma \, \xi_k^{(t)}), \qquad \xi_k^{(t)} \overset{\text{i.i.d.}}{\sim} \mathcal{N}(0,1),
+\]
+with \(\sigma = 0.05\). This noise captures unmodelled day-to-day variability in transmission---due to reporting delays, local behavioural changes, or stochastic contact patterns---so that the simulated data entering the ABC distance are random even when the underlying SIR dynamics are deterministic. This distinction is important here, as ABC is applied to simulated observations rather than to the deterministic ODE solution itself.
 
 To reduce confounding effects due to viral mutations and heterogeneous public-health responses, we restrict attention to the first epidemic wave, from March to July 2020. Over this period, the virus strain and the major national interventions were comparatively homogeneous across departments, making a simplified hierarchical formulation more reasonable.
 
@@ -192,3 +153,17 @@ Such a setting is challenging for standard ABC methods, including sequential var
 Figure~\ref{fig_SIR_posterior} illustrates this point by comparing the posterior distributions of \(R_0\) obtained from aggregated national data and from the full collection of departmental trajectories. Using aggregated national data leads to flatter posterior distributions because substantial spatial information is lost. In contrast, the posterior distribution obtained with permABC-SMC from the 94 departmental time series is markedly more concentrated, reflecting the gain from jointly modelling shared global structure and department-specific heterogeneity. The inferred local heterogeneities are shown in the right panel of Figure~\ref{fig_SIR_posterior} and are also mapped geographically in Figure~\ref{fig_SIR_map}.
 
 Despite these encouraging results, the SIR model remains a highly simplified description of epidemic dynamics and is inevitably misspecified when fitted to real hospitalization time series. In particular, the observation process linking infections to hospital admissions is only coarsely modelled, and many relevant mechanisms---such as reporting effects, delays, behavioural changes, and spatial interactions---are ignored. As a consequence, some posterior estimates of the local recovery rates \(\nu_k\) can take implausibly large values, which should be interpreted as compensating for model misspecification rather than as epidemiologically realistic estimates. This application should therefore be viewed primarily as a proof of scalability and practical relevance for permABC, rather than as a fully realistic epidemiological analysis.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[scale=.5]{fig/fig7_posterior_comparison_seed_42.pdf}
+    \caption{Posterior approximation for the global \(R_0\) parameter and the local recovery rates \(\nu_k\) in the hierarchical SIR model described in \eqref{eqSIR}, where \(R_0 = \delta / \nu\). The inference is performed using departmental-level data (\( K = 94 \), blue) or national-level aggregation (\(K = 1\), red).}
+    \label{fig_SIR_posterior}
+\end{figure}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[scale=.5]{fig/fig8_map_departmental_seed_42.pdf}
+    \caption{Map of the posterior mean estimates of the local recovery rate \(\nu_k\) for each department.}
+    \label{fig_SIR_map}
+\end{figure}
