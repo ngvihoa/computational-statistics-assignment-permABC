@@ -9,6 +9,7 @@
 
 cd ~/permABC
 source .venv/bin/activate
+export PYTHONUNBUFFERED=1
 
 SEED=42
 SCALE="departmental"
