@@ -64,7 +64,7 @@ MICRO_METHODS = [
     "LSA custom warm",
     "Hilbert",
     "Hilbert+Swap",
-    "Sinkhorn (numba)",
+    "Sinkhorn",
     "Sinkhorn+Swap",
     "Swap only",
 ]
@@ -106,12 +106,12 @@ def run_micro_single(method, local_mats, global_d, model, zs, y_obs, K,
         ys, zs_idx = do_swap(local_mats, ys, zs_idx)
         dists = compute_total_distance(zs_idx, ys, local_mats, global_d)
 
-    elif method == "Sinkhorn (numba)":
-        ys, zs_idx = sinkhorn_assignment(local_mats, backend="numba")
+    elif method == "Sinkhorn":
+        ys, zs_idx = sinkhorn_assignment(local_mats, backend="auto")
         dists = compute_total_distance(zs_idx, ys, local_mats, global_d)
 
     elif method == "Sinkhorn+Swap":
-        ys, zs_idx = sinkhorn_assignment(local_mats, backend="numba")
+        ys, zs_idx = sinkhorn_assignment(local_mats, backend="auto")
         ys, zs_idx = do_swap(local_mats, ys, zs_idx)
         dists = compute_total_distance(zs_idx, ys, local_mats, global_d)
 
