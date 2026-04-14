@@ -99,18 +99,24 @@ def _log_posterior_sigma2_unnorm(model, y_obs, sigma2):
 
 def build_sigma2_reference_bins(model, y_obs, nbins=80, grid_size=4000, tail_prob=1e-4):
     """
-    Fixed histogram edges for sigma2 from the true marginal p(sigma2 | y_obs).
+    Fixed histogram edges for sigma2 covering both prior and posterior.
+
+    Bins span from the prior's lower tail to the prior's upper tail,
+    ensuring that both prior-like (early ABC) and posterior-like (late ABC)
+    particles land inside the bins.
 
     Same ``edges`` must be reused for all methods / epsilon so KL_sigma2 is comparable.
     """
     from scipy.stats import invgamma
 
+    # Prior range
     lo_prior = float(invgamma.ppf(tail_prob, a=float(model.alpha), scale=float(model.beta)))
     hi_prior = float(invgamma.ppf(1.0 - tail_prob, a=float(model.alpha), scale=float(model.beta)))
 
     lo_prior = max(lo_prior, 1e-8)
     hi_prior = max(hi_prior, lo_prior * 1.01)
 
+    # Posterior mode range (for ensuring coverage)
     grid = np.exp(np.linspace(np.log(lo_prior), np.log(hi_prior), int(grid_size)))
     logp = np.array(
         [_log_posterior_sigma2_unnorm(model, y_obs, float(s)) for s in grid],
@@ -125,11 +131,11 @@ def build_sigma2_reference_bins(model, y_obs, nbins=80, grid_size=4000, tail_pro
     cdf = np.concatenate([[0.0], np.cumsum(mass)])
     cdf /= max(cdf[-1], 1e-300)
 
-    lo = float(np.interp(tail_prob, cdf, grid))
-    hi = float(np.interp(1.0 - tail_prob, cdf, grid))
+    hi_post = float(np.interp(1.0 - tail_prob, cdf, grid))
 
-    lo = max(lo, 1e-8)
-    hi = max(hi, lo * 1.01)
+    # Bins span from prior lower tail to max(prior upper, posterior upper)
+    lo = lo_prior
+    hi = max(hi_prior, hi_post)
 
     edges = np.exp(np.linspace(np.log(lo), np.log(hi), nbins + 1))
     return edges
