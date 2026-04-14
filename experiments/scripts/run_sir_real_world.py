@@ -276,13 +276,15 @@ def _gibbs_result_to_lightweight(locals_chain, r0_chain, eps_loc, eps_glob, time
 
 
 def run_method(method_name, method_info, key, model, y_obs, args,
-               epsilon_from_perm_smc=None):
+               epsilon_from_perm_smc=None, nsim_from_perm_smc=None):
     """Dispatch to the appropriate algorithm based on method type.
 
     Parameters
     ----------
     epsilon_from_perm_smc : float or None
         Final epsilon from permABC-SMC run, used as starting epsilon for OS/UM.
+    nsim_from_perm_smc : int or None
+        Total N_sim from permABC-SMC run, used to calibrate ABC-Gibbs T.
     """
     mtype = method_info['type']
     Fi = args.final_iteration
@@ -329,10 +331,21 @@ def run_method(method_name, method_info, key, model, y_obs, args,
         if y_obs_2d.ndim == 1:
             y_obs_2d = y_obs_2d[None, :]
 
+        T = args.n_particles  # T = N_particles
+
+        # Adapt M to match permABC-SMC budget: M = N_sim / (T * (K+1))
+        if nsim_from_perm_smc is not None:
+            M = max(1, int(nsim_from_perm_smc / (T * (K + 1))))
+        else:
+            M = args.gibbs_M_loc  # fallback
+
+        print(f"  ABC-Gibbs: T={T}, M={M}, K={K}, "
+              f"expected N_sim={T * M * (K+1):,}")
+
         locals_chain, r0_chain, eps_loc, eps_glob, times, n_sim_per_iter = \
             run_gibbs_sampler_sir(
                 key=key, model=model, y_obs_2d=y_obs_2d,
-                T=args.gibbs_T, M_loc=args.gibbs_M_loc, M_glob=args.gibbs_M_glob,
+                T=T, M_loc=M, M_glob=M,
             )
         return _gibbs_result_to_lightweight(
             locals_chain, r0_chain, eps_loc, eps_glob, times,
@@ -443,8 +456,9 @@ def main():
         print(f"  Scale: {scale.upper()} (K={model.K})")
         print(f"{'='*60}")
 
-        # Run permABC-SMC first to get its final epsilon for OS/UM
+        # Run permABC-SMC first to get its final epsilon and N_sim for other methods
         epsilon_from_perm_smc = None
+        nsim_from_perm_smc = None
         ordered_methods = list(methods_to_run)
         if "permABC-SMC" in ordered_methods:
             ordered_methods.remove("permABC-SMC")
@@ -460,15 +474,18 @@ def main():
                 lightweight = run_method(
                     method_name, method_info, subkey, model, y_obs, args,
                     epsilon_from_perm_smc=epsilon_from_perm_smc,
+                    nsim_from_perm_smc=nsim_from_perm_smc,
                 )
                 elapsed = _time.perf_counter() - t0
                 print(f"  Done in {elapsed:.1f}s | N_sim={lightweight.get('total_n_sim', '?'):,} | "
                       f"eps_final={lightweight.get('final_epsilon', '?')}")
 
-                # Capture permABC-SMC epsilon for OS/UM
+                # Capture permABC-SMC stats for other methods
                 if method_name == "permABC-SMC":
                     epsilon_from_perm_smc = lightweight.get('final_epsilon', None)
+                    nsim_from_perm_smc = lightweight.get('total_n_sim', None)
                     print(f"  -> epsilon for OS/UM: {epsilon_from_perm_smc}")
+                    print(f"  -> N_sim for ABC-Gibbs calibration: {nsim_from_perm_smc:,}")
 
                 save_lightweight(lightweight, scale, method_info['tag'], common_metadata, args.results_dir)
                 all_results[(method_name, scale)] = lightweight
