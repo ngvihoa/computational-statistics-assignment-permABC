@@ -29,7 +29,7 @@ except ImportError:
 # Enable 64-bit precision for numerical stability
 jax.config.update("jax_enable_x64", True)
 
-# Optional Numba backend (~6x faster than JAX for SIR loops)
+# Numba backend (~30x faster than JAX on multi-core CPU for SIR loops)
 try:
     from numba import njit, prange
     _HAS_NUMBA = True
@@ -37,98 +37,102 @@ except ImportError:
     _HAS_NUMBA = False
 
 
+# ── Numba SIR simulator ────────────────────────────────────────────────────
+
+if _HAS_NUMBA:
+    @njit(parallel=True, cache=True)
+    def _simulate_sir_numba(S0, I0, R0, beta, gamma, n_pop, n_obs, dt,
+                            noise, steps_per_day):
+        """Numba-parallel SIR simulation.
+
+        Parameters: all numpy arrays, shapes (N, K) for states/rates,
+        noise shape (N, K, n_obs, steps_per_day).
+        Returns I_traj of shape (N, K, n_obs).
+        """
+        N, K = S0.shape
+        I_traj = np.empty((N, K, n_obs), dtype=np.float64)
+
+        for p in prange(N):
+            for k in range(K):
+                S = S0[p, k]
+                I = I0[p, k]
+                R = R0[p, k]
+                for t in range(n_obs):
+                    for s in range(steps_per_day):
+                        S_safe = max(S, 0.0)
+                        I_safe = max(I, 0.0)
+                        inf_rate = beta[p, k] * S_safe * I_safe / n_pop * dt
+                        new_inf = min(inf_rate * noise[p, k, t, s], S_safe)
+                        rec_rate = gamma[p, k] * I_safe * dt
+                        new_rec = min(rec_rate, I_safe)
+                        I = max(0.0, I_safe + new_inf - new_rec)
+                        R = max(0.0, R + new_rec)
+                        S = max(0.0, n_pop - I - R)
+                    I_traj[p, k, t] = I
+        return I_traj
+
+
+def simulate_sir_numba(S0, I0, R0, beta, gamma, n_pop, n_obs,
+                       noise_key, sigma=0.05, steps_per_day=10):
+    """Wrapper: generate JAX noise then call Numba kernel. Returns numpy array."""
+    dt = 1.0 / steps_per_day
+    S0_np = np.asarray(S0, dtype=np.float64)
+    I0_np = np.asarray(I0, dtype=np.float64)
+    R0_np = np.asarray(R0, dtype=np.float64)
+    beta_np = np.asarray(beta, dtype=np.float64)
+    gamma_np = np.asarray(gamma, dtype=np.float64)
+
+    N, K = S0_np.shape
+    if noise_key is not None and sigma > 0:
+        noise = np.asarray(
+            jnp.exp(sigma * random.normal(noise_key, (N, K, n_obs, steps_per_day))),
+            dtype=np.float64,
+        )
+    else:
+        noise = np.ones((N, K, n_obs, steps_per_day), dtype=np.float64)
+
+    return _simulate_sir_numba(S0_np, I0_np, R0_np, beta_np, gamma_np,
+                               float(n_pop), n_obs, dt, noise, steps_per_day)
+
+
+# ── JAX SIR simulator (fallback) ───────────────────────────────────────────
+
 @partial(jit, static_argnames=['n_obs', 'steps_per_day', 'sigma'])
-def simulate_sir_jax(S0, I0, R0, beta, gamma, n_pop, n_obs, dt=0.1, 
+def simulate_sir_jax(S0, I0, R0, beta, gamma, n_pop, n_obs, dt=0.1,
                      noise_key=None, sigma=0.05, steps_per_day=10):
-    """
-    Efficient JAX implementation of SIR model simulation.
-    
-    This function simulates the SIR model using JAX for high performance.
-    It uses sub-daily time steps for numerical accuracy while returning
-    daily observations.
-    
-    Parameters
-    ----------
-    S0, I0, R0 : jnp.ndarray
-        Initial conditions for Susceptible, Infected, Recovered populations.
-        Shape: (n_particles, n_regions)
-    beta, gamma : jnp.ndarray
-        Transmission and recovery rates. Shape: (n_particles, n_regions)
-    n_pop : float
-        Total population size.
-    n_obs : int
-        Number of daily observations to return.
-    dt : float, default=0.1
-        Internal time step (fraction of day).
-    noise_key : jax.random.PRNGKey, optional
-        Random key for stochastic simulation.
-    sigma : float, default=0.05
-        Noise level for stochastic transmission.
-    steps_per_day : int, default=10
-        Number of sub-steps per day.
-        
-    Returns
-    -------
-    jnp.ndarray
-        Infected trajectory of shape (n_particles, n_regions, n_obs).
-    """
+    """JAX implementation of SIR simulation (used when Numba unavailable)."""
     n_particles, n_regions = S0.shape
     dtype = S0.dtype
-    
-    # Generate noise if stochastic simulation requested
+
     if noise_key is not None and sigma > 0:
         noise_shape = (n_particles, n_regions, n_obs, steps_per_day)
         noise = jnp.exp(sigma * random.normal(noise_key, noise_shape, dtype=dtype))
     else:
         noise = jnp.ones((n_particles, n_regions, n_obs, steps_per_day), dtype=dtype)
-    
+
     def simulate_particle(particle_idx):
-        """Simulate a single particle (all regions for one parameter set)."""
-        
         def simulate_day(state, day_idx):
-            """Simulate one day with sub-steps."""
             S, I, R = state
-            
             def substep(carry, step_idx):
-                """Single sub-step of the simulation."""
                 S_curr, I_curr, R_curr = carry
-                
-                # Ensure non-negative populations
                 S_safe = jnp.maximum(S_curr, 0.0)
                 I_safe = jnp.maximum(I_curr, 0.0)
-                
-                # Transmission: S -> I (with optional noise)
                 inf_rate = beta[particle_idx] * S_safe * I_safe / n_pop * dt
                 noise_factor = noise[particle_idx, :, day_idx, step_idx]
                 new_infections = jnp.minimum(inf_rate * noise_factor, S_safe)
-                
-                # Recovery: I -> R
                 recovery_rate = gamma[particle_idx] * I_safe * dt
                 new_recoveries = jnp.minimum(recovery_rate, I_safe)
-                
-                # Update populations
                 I_new = jnp.maximum(0.0, I_safe + new_infections - new_recoveries)
                 R_new = jnp.maximum(0.0, R_curr + new_recoveries)
                 S_new = jnp.maximum(0.0, n_pop - I_new - R_new)
-                
                 return (S_new, I_new, R_new), I_new
-            
-            # Run all sub-steps for this day
             final_state, _ = lax.scan(substep, (S, I, R), jnp.arange(steps_per_day))
-            return final_state, final_state[1]  # Return final state and I count
-        
-        # Initial conditions for this particle
+            return final_state, final_state[1]
         initial_state = (S0[particle_idx], I0[particle_idx], R0[particle_idx])
-        
-        # Simulate all days
         _, I_trajectory = lax.scan(simulate_day, initial_state, jnp.arange(n_obs))
-        
         return I_trajectory
-    
-    # Simulate all particles in parallel
+
     I_trajectories = vmap(simulate_particle)(jnp.arange(n_particles))
-    
-    # Reshape: (n_particles, n_obs, n_regions) -> (n_particles, n_regions, n_obs)
     return jnp.transpose(I_trajectories, (0, 2, 1))
 
 
@@ -253,19 +257,23 @@ class SIRWithKnownInit(ModelBase):
         R0_array = jnp.full_like(betas, self.R0)
 
         # Simulate epidemic
-        result = simulate_sir_jax(
-            S0, I0_array, R0_array, betas, gammas, 
-            n_pop=self.n_pop, 
-            n_obs=self.n_obs,
-            noise_key=key
-        )
-        
+        if _HAS_NUMBA:
+            result = simulate_sir_numba(
+                S0, I0_array, R0_array, betas, gammas,
+                n_pop=self.n_pop, n_obs=self.n_obs, noise_key=key,
+            )
+        else:
+            result = simulate_sir_jax(
+                S0, I0_array, R0_array, betas, gammas,
+                n_pop=self.n_pop, n_obs=self.n_obs, noise_key=key,
+            )
+
         return np.array(result)
 
     def prior_logpdf(self, thetas):
         """
         Compute log probability density of the prior.
-        
+
         For uniform priors, this is constant within support.
         
         Parameters
@@ -418,15 +426,19 @@ class SIRWithUnknownInit(ModelBase):
         S0 = jnp.maximum(0.0, self.n_pop - I0 - R0_init)
         
         # Simulate epidemic
-        result = simulate_sir_jax(
-            S0, I0, R0_init, betas, gammas, 
-            n_pop=self.n_pop, 
-            n_obs=self.n_obs,
-            noise_key=key
-        )
-        
+        if _HAS_NUMBA:
+            result = simulate_sir_numba(
+                S0, I0, R0_init, betas, gammas,
+                n_pop=self.n_pop, n_obs=self.n_obs, noise_key=key,
+            )
+        else:
+            result = simulate_sir_jax(
+                S0, I0, R0_init, betas, gammas,
+                n_pop=self.n_pop, n_obs=self.n_obs, noise_key=key,
+            )
+
         return np.array(result)
-    
+
     def prior_logpdf(self, thetas):
         """
         Compute log probability density of the prior.
@@ -508,26 +520,26 @@ class SIR_real_world(ModelBase):
 
     def data_generator(self, key, thetas: Theta):
         """Generates epidemic data from the given parameters."""
-        # Extract parameters from the Theta object
         I0 = thetas.loc[:, :, 0]
         R0_init = thetas.loc[:, :, 1]
         gamma = thetas.loc[:, :, 2]
         R0_global = thetas.glob
-        
-        # Derive beta from R0 and gamma
+
         beta = R0_global * gamma
-        
-        # Ensure S0 is non-negative
         S0 = jnp.maximum(0.0, self.n_pop - I0 - R0_init)
-        
-        # Correctly call the JAX-based SIR simulator
-        result = simulate_sir_jax(
-            S0, I0, R0_init, beta, gamma,
-            n_pop=self.n_pop,
-            n_obs=self.n_obs,
-            noise_key=key,
-            sigma=self.sigma,
-        )
+
+        if _HAS_NUMBA:
+            result = simulate_sir_numba(
+                S0, I0, R0_init, beta, gamma,
+                n_pop=self.n_pop, n_obs=self.n_obs,
+                noise_key=key, sigma=self.sigma,
+            )
+        else:
+            result = simulate_sir_jax(
+                S0, I0, R0_init, beta, gamma,
+                n_pop=self.n_pop, n_obs=self.n_obs,
+                noise_key=key, sigma=self.sigma,
+            )
         return np.array(result)
 
     def prior_logpdf(self, thetas: Theta):
