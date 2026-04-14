@@ -333,14 +333,17 @@ def run_method(method_name, method_info, key, model, y_obs, args,
 
         T = args.n_particles  # T = N_particles
 
-        # Adapt M to match permABC-SMC budget: M = N_sim / (T * (K+1))
+        # Adapt M to match permABC-SMC budget: M = N_sim / (T * 2K)
+        # Local: K regions x M candidates = K*M sims
+        # Global: M candidates x K regions = K*M sims
+        # Total per iter = 2*K*M
         if nsim_from_perm_smc is not None:
-            M = max(1, int(nsim_from_perm_smc / (T * (K + 1))))
+            M = max(1, int(nsim_from_perm_smc / (T * 2 * K)))
         else:
             M = args.gibbs_M_loc  # fallback
 
         print(f"  ABC-Gibbs: T={T}, M={M}, K={K}, "
-              f"expected N_sim={T * M * (K+1):,}")
+              f"expected N_sim={T * M * 2 * K:,}")
 
         locals_chain, r0_chain, eps_loc, eps_glob, times, n_sim_per_iter = \
             run_gibbs_sampler_sir(
