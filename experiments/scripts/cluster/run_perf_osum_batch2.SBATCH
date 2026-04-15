@@ -12,7 +12,7 @@ source .venv/bin/activate
 
 export PYTHONUNBUFFERED=1
 
-for pair in "15 0" "15 1" "15 2" "15 3" "15 4" "15 5" "20 0" "20 1" "20 2" "20 3" "20 4" "20 5"; do
+for pair in "10 0" "10 1" "10 2" "10 3" "10 4" "10 5" "30 0" "30 1" "30 2" "30 3" "30 4" "30 5"; do
     set -- $pair
     echo "=== K=$1, K_outliers=$2 (PMC+OSUM) ==="
     python3 experiments/scripts/run_performance_comparison.py \
