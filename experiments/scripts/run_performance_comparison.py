@@ -428,9 +428,11 @@ def _append_smc_rows(target_rows, out, display_name, model, y_obs, K, N_particle
     step_range = [n_steps - 1] if last_only else range(n_steps)
 
     for i in step_range:
-        denom = K * max(float(unique[i]), 1e-12) * max(float(N_particles), 1.0)
-        n_sim_norm = n_sim_cum[i] / denom * n_sample
-        time_norm = time_cum[i] / denom * n_sample
+        unique_count = max(float(unique[i]), 1e-12) * max(float(N_particles), 1.0)
+        # n_sim_cum counts compartment-sims (draws * K), divide by K to get draws
+        n_sim_norm = n_sim_cum[i] / (K * unique_count) * n_sample
+        # time_cum is wall-clock seconds, no K conversion needed
+        time_norm = time_cum[i] / unique_count * n_sample
 
         thetas_i = _safe_array_at(thetas_list, i + 1)
         weights_i = _safe_array_at(weights_list, i + 1)
@@ -534,10 +536,11 @@ def process_results(vanilla_results, smc_results, osum_results, model, y_obs,
         processed_results['w2_mu_avg'].append(diag['w2_mu_avg'])
         processed_results['sw2_joint'].append(diag['sw2_joint'])
 
-    n_sim_raw_van = N_points * alphas
-    time_raw_van_arr = time_van * alphas
-    n_sim_raw_perm = N_points * alphas
-    time_raw_perm_arr = time_perm_van * alphas
+    # n_sim_raw in compartment-simulations (consistent with SMC where N_sim = draws * K)
+    n_sim_raw_van = n_sim_van * K
+    time_raw_van_arr = n_sim_van * time_by_sim_van
+    n_sim_raw_perm = n_sim_perm_van * K
+    time_raw_perm_arr = n_sim_perm_van * time_by_sim_perm_van
     processed_results['n_sim_raw'] = list(n_sim_raw_van) + list(n_sim_raw_perm)
     processed_results['time_raw'] = list(time_raw_van_arr) + list(time_raw_perm_arr)
 
