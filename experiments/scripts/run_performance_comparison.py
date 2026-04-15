@@ -9,6 +9,8 @@ Usage:
     python run_performance_comparison.py --K 20 --K_outliers 4 --osum
     python run_performance_comparison.py --K 20 --K_outliers 0 --no-osum --seed 42
     python run_performance_comparison.py --rerun experiments/results/performance_K_20_outliers_4_osum_True_seed_42.pkl
+    python run_performance_comparison.py --K 5 --methods osum --seed 42   # run only OS/UM, append to existing CSV
+    python run_performance_comparison.py --K 5 --methods smc osum --seed 42  # run SMC + OS/UM only
 """
 
 import os
@@ -196,7 +198,7 @@ def run_vanilla_methods(key, model, N_points, y_obs):
 
 
 def run_smc_methods(key, model, N_particles, y_obs, stopping_rate, N_points, K):
-    """Run SMC-based ABC methods."""
+    """Run SMC-based ABC methods (ABC-SMC + permABC-SMC)."""
     kernel = KernelTruncatedRW
     results = {}
 
@@ -211,21 +213,6 @@ def run_smc_methods(key, model, N_particles, y_obs, stopping_rate, N_points, K):
     )
     results['abc_smc'] = out_smc
 
-    # ABC PMC
-    print("Running ABC PMC...")
-    if abc_pmc is None:
-        print("  Skipping ABC PMC (abc_pmc import failed: likely numba/numpy incompatibility).")
-        results['abc_pmc'] = None
-    else:
-        key, subkey = random.split(key)
-        model.reset_weights_distance()
-        out_pmc = abc_pmc(
-            key=subkey, model=model, n_particles=N_particles, epsilon_target=0, y_obs=y_obs,
-            alpha=0.95, verbose=1, update_weights_distance=False,
-            stopping_accept_rate=stopping_rate, N_sim_max=N_points*K
-        )
-        results['abc_pmc'] = out_pmc
-
     # permABC SMC
     print("Running permABC SMC...")
     key, subkey = random.split(key)
@@ -238,6 +225,23 @@ def run_smc_methods(key, model, N_particles, y_obs, stopping_rate, N_points, K):
     results['perm_abc_smc'] = out_perm_smc
 
     return key, results
+
+
+def run_pmc_method(key, model, N_particles, y_obs, stopping_rate, N_points, K):
+    """Run ABC-PMC method."""
+    print("Running ABC PMC...")
+    if abc_pmc is None:
+        print("  Skipping ABC PMC (abc_pmc import failed: likely numba/numpy incompatibility).")
+        return key, None
+
+    key, subkey = random.split(key)
+    model.reset_weights_distance()
+    out_pmc = abc_pmc(
+        key=subkey, model=model, n_particles=N_particles, epsilon_target=0, y_obs=y_obs,
+        alpha=0.95, verbose=1, update_weights_distance=False,
+        stopping_accept_rate=stopping_rate, N_sim_max=N_points*K
+    )
+    return key, out_pmc
 
 
 def run_osum_methods(key, model, N_particles, y_obs, K):
@@ -441,6 +445,13 @@ def _append_smc_rows(target_rows, out, display_name, model, y_obs, K, N_particle
         if thetas_i is None:
             continue
 
+        # Skip diagnostics for UM intermediate steps where L < K
+        loc_i = thetas_i.loc if hasattr(thetas_i, 'loc') else thetas_i
+        n_comp = loc_i.shape[1] if hasattr(loc_i, 'shape') and loc_i.ndim >= 2 else K
+        if n_comp < K:
+            print(f"  Skipping diagnostics {display_name} step {i+1}/{n_steps} (L={n_comp} < K={K})", flush=True)
+            continue
+
         print(f"  Diagnostics {display_name} step {i+1}/{n_steps} (eps={epsilons[i]:.4f})", flush=True)
         diag = _compute_row_diagnostics(model, y_obs, thetas_i, weights_i, perm_i, sigma2_edges)
 
@@ -465,84 +476,85 @@ def process_results(vanilla_results, smc_results, osum_results, model, y_obs,
     N_sample = 1000
     sigma2_edges = build_sigma2_reference_bins(model, y_obs, nbins=80)
 
-    dists = vanilla_results['vanilla_abc']['dists']
-    dists_perm = vanilla_results['vanilla_perm']['dists']
-    time_van = vanilla_results['vanilla_abc']['time']
-    time_perm_van = vanilla_results['vanilla_perm']['time']
-    N_points = len(dists)
-
-    time_by_sim_van = time_van / N_points
-    time_by_sim_perm_van = time_perm_van / N_points
-    alphas = np.logspace(0, -3, 10)
-    n_sim_van = 1 / alphas * N_sample
-    n_sim_perm_van = 1 / alphas * N_sample
+    # Check if vanilla results are available
+    has_vanilla = (vanilla_results is not None
+                   and vanilla_results.get('vanilla_abc') is not None
+                   and vanilla_results.get('vanilla_perm') is not None)
 
     processed_results = {
-        'method': ['ABC-Vanilla'] * len(alphas) + ['permABC-Vanilla'] * len(alphas),
-        'n_sim': np.concatenate([n_sim_van, n_sim_perm_van]),
-        'time': np.concatenate([n_sim_van * time_by_sim_van, n_sim_perm_van * time_by_sim_perm_van]),
-        'epsilon': np.concatenate([np.quantile(dists, alphas), np.quantile(dists_perm, alphas)]),
-        'kl_sigma2': [],
-        'score_joint': [],
-        'kl_sigma2_true_vs_abc': [],
-        'kl_mu_avg': [],
-        'w2_sigma2': [],
-        'w2_mu_avg': [],
-        'sw2_joint': [],
+        'method': [], 'n_sim': [], 'time': [], 'epsilon': [],
+        'kl_sigma2': [], 'score_joint': [], 'kl_sigma2_true_vs_abc': [],
+        'kl_mu_avg': [], 'w2_sigma2': [], 'w2_mu_avg': [], 'sw2_joint': [],
+        'n_sim_raw': [], 'time_raw': [],
     }
 
-    # Diagnostics for vanilla rejection ABC
-    thetas_van = vanilla_results['vanilla_abc']['thetas']
-    thetas_perm = vanilla_results['vanilla_perm']['thetas']
-    perm_van = vanilla_results['vanilla_perm'].get('zs_index', None)
+    if has_vanilla:
+        dists = vanilla_results['vanilla_abc']['dists']
+        dists_perm = vanilla_results['vanilla_perm']['dists']
+        time_van = vanilla_results['vanilla_abc']['time']
+        time_perm_van = vanilla_results['vanilla_perm']['time']
+        N_points = len(dists)
 
-    # Fixed sample size for diagnostics (same as SMC N_particles)
-    n_diag = N_particles
-    rng_diag = np.random.default_rng(42)
+        time_by_sim_van = time_van / N_points
+        time_by_sim_perm_van = time_perm_van / N_points
+        alphas = np.logspace(0, -3, 10)
+        n_sim_van = 1 / alphas * N_sample
+        n_sim_perm_van = 1 / alphas * N_sample
 
-    for j, eps_th in enumerate(np.quantile(dists, alphas)):
-        print(f"  Diagnostics ABC-Vanilla {j+1}/{len(alphas)} (eps={eps_th:.4f})", flush=True)
-        mask = dists <= eps_th
-        thetas_acc = thetas_van[mask]
-        # Subsample to fixed size for fair comparison with SMC
-        if len(thetas_acc) > n_diag:
-            idx = rng_diag.choice(len(thetas_acc), n_diag, replace=False)
-            thetas_acc = thetas_acc[idx]
-        diag = _compute_row_diagnostics(model, y_obs, thetas_acc, None, None, sigma2_edges)
-        processed_results['kl_sigma2'].append(diag['kl_sigma2'])
-        processed_results['score_joint'].append(diag['score_joint'])
-        processed_results['kl_sigma2_true_vs_abc'].append(diag['kl_sigma2_true_vs_abc'])
-        processed_results['kl_mu_avg'].append(diag['kl_mu_avg'])
-        processed_results['w2_sigma2'].append(diag['w2_sigma2'])
-        processed_results['w2_mu_avg'].append(diag['w2_mu_avg'])
-        processed_results['sw2_joint'].append(diag['sw2_joint'])
+        processed_results['method'] = ['ABC-Vanilla'] * len(alphas) + ['permABC-Vanilla'] * len(alphas)
+        processed_results['n_sim'] = list(np.concatenate([n_sim_van, n_sim_perm_van]))
+        processed_results['time'] = list(np.concatenate([n_sim_van * time_by_sim_van, n_sim_perm_van * time_by_sim_perm_van]))
+        processed_results['epsilon'] = list(np.concatenate([np.quantile(dists, alphas), np.quantile(dists_perm, alphas)]))
 
-    for j, eps_th in enumerate(np.quantile(dists_perm, alphas)):
-        print(f"  Diagnostics permABC-Vanilla {j+1}/{len(alphas)} (eps={eps_th:.4f})", flush=True)
-        mask = dists_perm <= eps_th
-        thetas_acc = thetas_perm[mask]
-        perm_mask = perm_van[mask] if perm_van is not None else None
-        # Subsample to fixed size for fair comparison with SMC
-        if len(thetas_acc) > n_diag:
-            idx = rng_diag.choice(len(thetas_acc), n_diag, replace=False)
-            thetas_acc = thetas_acc[idx]
-            perm_mask = perm_mask[idx] if perm_mask is not None else None
-        diag = _compute_row_diagnostics(model, y_obs, thetas_acc, None, perm_mask, sigma2_edges)
-        processed_results['kl_sigma2'].append(diag['kl_sigma2'])
-        processed_results['score_joint'].append(diag['score_joint'])
-        processed_results['kl_sigma2_true_vs_abc'].append(diag['kl_sigma2_true_vs_abc'])
-        processed_results['kl_mu_avg'].append(diag['kl_mu_avg'])
-        processed_results['w2_sigma2'].append(diag['w2_sigma2'])
-        processed_results['w2_mu_avg'].append(diag['w2_mu_avg'])
-        processed_results['sw2_joint'].append(diag['sw2_joint'])
+        # Diagnostics for vanilla rejection ABC
+        thetas_van = vanilla_results['vanilla_abc']['thetas']
+        thetas_perm = vanilla_results['vanilla_perm']['thetas']
+        perm_van = vanilla_results['vanilla_perm'].get('zs_index', None)
 
-    # n_sim_raw in compartment-simulations (consistent with SMC where N_sim = draws * K)
-    n_sim_raw_van = n_sim_van * K
-    time_raw_van_arr = n_sim_van * time_by_sim_van
-    n_sim_raw_perm = n_sim_perm_van * K
-    time_raw_perm_arr = n_sim_perm_van * time_by_sim_perm_van
-    processed_results['n_sim_raw'] = list(n_sim_raw_van) + list(n_sim_raw_perm)
-    processed_results['time_raw'] = list(time_raw_van_arr) + list(time_raw_perm_arr)
+        n_diag = N_particles
+        rng_diag = np.random.default_rng(42)
+
+        for j, eps_th in enumerate(np.quantile(dists, alphas)):
+            print(f"  Diagnostics ABC-Vanilla {j+1}/{len(alphas)} (eps={eps_th:.4f})", flush=True)
+            mask = dists <= eps_th
+            thetas_acc = thetas_van[mask]
+            if len(thetas_acc) > n_diag:
+                idx = rng_diag.choice(len(thetas_acc), n_diag, replace=False)
+                thetas_acc = thetas_acc[idx]
+            diag = _compute_row_diagnostics(model, y_obs, thetas_acc, None, None, sigma2_edges)
+            processed_results['kl_sigma2'].append(diag['kl_sigma2'])
+            processed_results['score_joint'].append(diag['score_joint'])
+            processed_results['kl_sigma2_true_vs_abc'].append(diag['kl_sigma2_true_vs_abc'])
+            processed_results['kl_mu_avg'].append(diag['kl_mu_avg'])
+            processed_results['w2_sigma2'].append(diag['w2_sigma2'])
+            processed_results['w2_mu_avg'].append(diag['w2_mu_avg'])
+            processed_results['sw2_joint'].append(diag['sw2_joint'])
+
+        for j, eps_th in enumerate(np.quantile(dists_perm, alphas)):
+            print(f"  Diagnostics permABC-Vanilla {j+1}/{len(alphas)} (eps={eps_th:.4f})", flush=True)
+            mask = dists_perm <= eps_th
+            thetas_acc = thetas_perm[mask]
+            perm_mask = perm_van[mask] if perm_van is not None else None
+            if len(thetas_acc) > n_diag:
+                idx = rng_diag.choice(len(thetas_acc), n_diag, replace=False)
+                thetas_acc = thetas_acc[idx]
+                perm_mask = perm_mask[idx] if perm_mask is not None else None
+            diag = _compute_row_diagnostics(model, y_obs, thetas_acc, None, perm_mask, sigma2_edges)
+            processed_results['kl_sigma2'].append(diag['kl_sigma2'])
+            processed_results['score_joint'].append(diag['score_joint'])
+            processed_results['kl_sigma2_true_vs_abc'].append(diag['kl_sigma2_true_vs_abc'])
+            processed_results['kl_mu_avg'].append(diag['kl_mu_avg'])
+            processed_results['w2_sigma2'].append(diag['w2_sigma2'])
+            processed_results['w2_mu_avg'].append(diag['w2_mu_avg'])
+            processed_results['sw2_joint'].append(diag['sw2_joint'])
+
+        # n_sim_raw in compartment-simulations (consistent with SMC where N_sim = draws * K)
+        n_sim_raw_van = n_sim_van * K
+        time_raw_van_arr = n_sim_van * time_by_sim_van
+        n_sim_raw_perm = n_sim_perm_van * K
+        time_raw_perm_arr = n_sim_perm_van * time_by_sim_perm_van
+        processed_results['n_sim_raw'] = list(n_sim_raw_van) + list(n_sim_raw_perm)
+        processed_results['time_raw'] = list(time_raw_van_arr) + list(time_raw_perm_arr)
 
     # SMC results
     smc_data = []
@@ -586,7 +598,7 @@ def process_results(vanilla_results, smc_results, osum_results, model, y_obs,
                     target_rows=osum_data, out=out_full,
                     display_name='permABC-SMC-UM', model=model, y_obs=y_obs,
                     K=K, N_particles=N_particles, n_sample=N_sample,
-                    sigma2_edges=sigma2_edges,
+                    sigma2_edges=sigma2_edges, last_only=True,
                 )
 
     # Combine all results
@@ -1018,6 +1030,11 @@ def parse_arguments():
                         help='Include over-sampling and under-matching methods')
     parser.add_argument('--no-osum', dest='include_osum', action='store_false',
                         help='Exclude over-sampling and under-matching methods')
+    parser.add_argument('--methods', nargs='+', default=None,
+                        choices=['vanilla', 'smc', 'pmc', 'osum'],
+                        help='Run only selected method groups (vanilla, smc, pmc, osum). '
+                             'Appends to existing CSV if present. '
+                             'Example: --methods osum pmc  to run only OS/UM + PMC.')
     parser.add_argument('--plot', type=str, choices=['nsim', 'time', 'both'], default='both',
                         help='Type of plots to generate: nsim (simulations), time, or both (default: both)')
     parser.add_argument('--output-dir', type=str, default="experiments",
@@ -1029,6 +1046,39 @@ def parse_arguments():
     return parser.parse_args()
 
 
+def _load_existing_csv(K, K_outliers, seed, output_dir):
+    """Load existing CSV results if present, return DataFrame or list-of-dicts."""
+    for osum_val in [True, False]:
+        csv_path = os.path.join(
+            output_dir, "experiments", "results", "performance_comparison",
+            f"performance_K_{K}_outliers_{K_outliers}_osum_{osum_val}_seed_{seed}.csv"
+        )
+        if os.path.exists(csv_path):
+            print(f"Loading existing results from: {csv_path}")
+            if pd is not None:
+                return pd.read_csv(csv_path), csv_path
+            else:
+                import csv as csv_mod
+                with open(csv_path, "r") as f:
+                    reader = csv_mod.DictReader(f)
+                    return list(reader), csv_path
+    return None, None
+
+
+def _merge_results(existing_df, new_df):
+    """Merge new results into existing, replacing methods that overlap."""
+    if pd is not None and hasattr(new_df, "columns"):
+        new_methods = set(new_df['method'].unique())
+        # Remove old rows for methods we're replacing
+        keep = existing_df[~existing_df['method'].isin(new_methods)]
+        merged = pd.concat([keep, new_df], ignore_index=True)
+        return merged
+    else:
+        new_methods = set(r['method'] for r in new_df)
+        keep = [r for r in existing_df if r.get('method') not in new_methods]
+        return keep + list(new_df)
+
+
 def main():
     """Main execution function."""
     args = parse_arguments()
@@ -1037,10 +1087,25 @@ def main():
         rerun_from_file(args.rerun, args.plot, args.include_osum, args.output_dir)
         return
 
+    # Determine which method groups to run
+    if args.methods is not None:
+        run_vanilla = 'vanilla' in args.methods
+        run_smc = 'smc' in args.methods
+        run_pmc = 'pmc' in args.methods
+        run_osum = 'osum' in args.methods
+        include_osum = run_osum
+    else:
+        run_vanilla = True
+        run_smc = True
+        run_pmc = True
+        run_osum = args.include_osum
+        include_osum = args.include_osum
+
     print("Performance comparison between ABC methods")
     print(f"Parameters: K={args.K}, K_outliers={args.K_outliers}, seed={args.seed}")
     print(f"N_points={args.N_points:,}, N_particles={args.N_particles:,}")
-    print(f"Include OSUM methods: {args.include_osum}")
+    method_groups = [g for g, run in [('vanilla', run_vanilla), ('smc', run_smc), ('pmc', run_pmc), ('osum', run_osum)] if run]
+    print(f"Method groups: {method_groups}")
     print(f"Plot type: {args.plot}")
 
     model, y_obs, true_theta, key, N_points, N_particles, stopping_rate, K = setup_experiment(
@@ -1048,24 +1113,50 @@ def main():
         N_points=args.N_points, N_particles=args.N_particles
     )
 
-    key, vanilla_results = run_vanilla_methods(key, model, N_points, y_obs)
+    vanilla_results = None
+    smc_results = {}
+    osum_results = None
 
-    key, smc_results = run_smc_methods(
-        key, model, N_particles, y_obs, stopping_rate, N_points, K
+    if run_vanilla:
+        key, vanilla_results = run_vanilla_methods(key, model, N_points, y_obs)
+
+    if run_smc:
+        key, smc_results = run_smc_methods(
+            key, model, N_particles, y_obs, stopping_rate, N_points, K
+        )
+
+    if run_pmc:
+        key, pmc_out = run_pmc_method(key, model, N_particles, y_obs, stopping_rate, N_points, K)
+        if pmc_out is not None:
+            smc_results['abc_pmc'] = pmc_out
+
+    if run_osum:
+        key, osum_results = run_osum_methods(key, model, N_particles, y_obs, K)
+
+    # Build DataFrame from newly computed results
+    new_df = process_results(
+        vanilla_results or {'vanilla_abc': None, 'vanilla_perm': None},
+        smc_results,
+        osum_results,
+        model, y_obs, K, N_particles,
+        include_osum=run_osum,
     )
 
-    if args.include_osum:
-        key, osum_results = run_osum_methods(key, model, N_particles, y_obs, K)
-    else:
-        osum_results = None
+    # If running a subset, merge with existing CSV
+    if args.methods is not None:
+        existing_df, existing_csv_path = _load_existing_csv(
+            args.K, args.K_outliers, args.seed, args.output_dir
+        )
+        if existing_df is not None:
+            new_df = _merge_results(existing_df, new_df)
+            print(f"Merged with existing results ({existing_csv_path})")
+        include_osum = True  # merged df may have osum methods
 
-    df = process_results(vanilla_results, smc_results, osum_results, model, y_obs, K, N_particles, args.include_osum)
-
-    analyze_performance_metrics(df)
+    analyze_performance_metrics(new_df)
 
     pkl_path, csv_path = save_results(
-        df, vanilla_results, smc_results, osum_results, model, y_obs, true_theta,
-        args.K, args.K_outliers, args.include_osum, args.seed, N_particles, args.output_dir, args.plot
+        new_df, vanilla_results, smc_results, osum_results, model, y_obs, true_theta,
+        args.K, args.K_outliers, include_osum, args.seed, N_particles, args.output_dir, args.plot
     )
 
     print("Performance comparison complete!")
