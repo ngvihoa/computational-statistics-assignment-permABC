@@ -6,8 +6,6 @@ proposal distributions rather than sequential Monte Carlo.
 """
 
 import numpy as np
-import numba as nb
-import particles
 import seaborn as sns
 import matplotlib.pyplot as plt
 import pandas as pd
