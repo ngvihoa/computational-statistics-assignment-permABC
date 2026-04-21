@@ -585,65 +585,46 @@ def abc_pmc(
             print(f"Proposal std - Local: min={np.min(std_loc):.3f}, max={np.max(std_loc):.3f}")
             print(f"Proposal std - Global: {std_glob:.3f}")
         
-        # Generate new particle generation
+        # Generate new particle generation via large-batch proposals
         new_thetas = Theta()
         new_zs = np.empty((0, zs.shape[1], zs.shape[2]))
         distance_values = np.empty(0)
         n_accept = 0
         n_sim = 0
-        
-        # Importance sampling until we have n_particles accepted
-        batch_size = max(1, int(n_particles * accept_rate))  # Smaller initial batch size
-        accept_rate = 1.0  # Reset acceptance rate for this iteration
-        while n_accept < n_particles:
-            key, key_move = random.split(key)
-            
-            # Adaptive batch size - start small and increase if acceptance rate is good
-            current_batch_size = min(batch_size, n_particles - n_accept)
-            
-            # Propose new particles
-            proposed_thetas, proposed_distances, proposed_zs = move_pmc(
-                key=key_move, model=model, thetas=thetas, weights=weights, y_obs=y_obs, 
-                size=int(current_batch_size), std_loc=std_loc, std_glob=std_glob, verbose=verbose
-            )
-            
-            # Accept particles within tolerance
-            accept = np.where(proposed_distances < epsilon)[0]
-            
-            if len(accept) > 0:
-                new_thetas = new_thetas.append(proposed_thetas[accept])
-                distance_values = np.append(distance_values, proposed_distances[accept])
-                new_zs = np.append(new_zs, proposed_zs[accept], axis=0)
 
-            n_sim += current_batch_size
-            n_accept += len(accept)
-            
-            
-            # If we're not getting any accepts, relax epsilon slightly
-            # if attempt > 20 and n_accept == 0:
-            #     epsilon_relaxed = epsilon * 1.1  # Relax by 10%
-            #     if verbose >= 1:
-            #         print(f"No particles accepted after {attempt} attempts, relaxing epsilon to {epsilon_relaxed:.3f}")
-            #     epsilon = epsilon_relaxed
-            
-            # if verbose > 1 and attempt % 10 == 0:
-            #     print(f"Attempt {attempt}: {n_accept}/{n_particles} particles accepted, current acceptance rate: {n_accept/n_sim:.3f}")
-        
-        # if attempt >= max_attempts:
-        #     if verbose >= 1:
-        #         print(f"Maximum attempts reached ({max_attempts}), stopping with {n_accept} particles")
-        #     if n_accept == 0:
-        #         if verbose >= 1:
-        #             print("No particles accepted, terminating algorithm")
-        #         break
-        #     elif n_accept < n_particles // 2:
-        #         if verbose >= 1:
-        #             print(f"Very few particles accepted ({n_accept}/{n_particles}), consider relaxing epsilon_target")
-        #         # Use what we have
-        #         n_particles = n_accept
-        
+        # Estimate how many proposals needed based on previous acceptance rate
+        safety_factor = 2.0
+        while n_accept < n_particles:
+            remaining = n_particles - n_accept
+            # Propose a big batch: remaining / expected_accept_rate * safety
+            batch_size = int(remaining / max(accept_rate, 0.001) * safety_factor)
+            batch_size = max(batch_size, remaining)
+            batch_size = min(batch_size, 500_000)  # cap memory
+
+            key, key_move = random.split(key)
+            proposed_thetas, proposed_distances, proposed_zs = move_pmc(
+                key=key_move, model=model, thetas=thetas, weights=weights, y_obs=y_obs,
+                size=int(batch_size), std_loc=std_loc, std_glob=std_glob, verbose=verbose
+            )
+
+            accept_idx = np.where(proposed_distances < epsilon)[0]
+
+            if len(accept_idx) > 0:
+                new_thetas = new_thetas.append(proposed_thetas[accept_idx])
+                distance_values = np.append(distance_values, proposed_distances[accept_idx])
+                new_zs = np.append(new_zs, proposed_zs[accept_idx], axis=0)
+
+            n_sim += batch_size
+            n_accept += len(accept_idx)
+
+            # Update acceptance rate estimate for next batch
+            if n_sim > 0:
+                accept_rate_est = n_accept / n_sim
+                if accept_rate_est > 0:
+                    accept_rate = accept_rate_est
+
         # Compute acceptance rate
-        accept_rate = n_accept/ n_sim
+        accept_rate = n_accept / n_sim
         
         if verbose >= 1:
             print(f"Simulations: {n_sim} (Accept rate: {accept_rate:.1%})")

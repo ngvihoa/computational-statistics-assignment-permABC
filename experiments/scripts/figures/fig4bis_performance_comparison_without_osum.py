@@ -22,6 +22,7 @@ import argparse
 import subprocess
 from pathlib import Path
 
+import numpy as np
 import matplotlib.pyplot as plt
 
 # Shared plot config
@@ -32,8 +33,40 @@ from plot_config import (
     records_from_pkl, detect_joint_key, joint_ylabel, metric_ylabel,
     plot_method_panel, find_project_root,
 )
+from diagnostics import sample_true_posterior, sliced_w2_joint
+from permabc.utils.functions import Theta
 
 setup_matplotlib()
+
+
+def compute_sw2_floor(model, y_obs, n_particles, n_projections=200, seed=0):
+    """Compute SW2(true, true) — the MC noise floor for N_particles."""
+    rng1 = np.random.default_rng(seed)
+    rng2 = np.random.default_rng(seed + 1000)
+    mu1, s2_1 = sample_true_posterior(model, y_obs, n_particles, rng=rng1)
+    mu2, s2_2 = sample_true_posterior(model, y_obs, n_particles, rng=rng2)
+
+    ref_joint = np.column_stack([mu2, s2_2])
+    abc_joint = np.column_stack([mu1, s2_1])
+    dim = abc_joint.shape[1]
+
+    rng_proj = np.random.default_rng(seed + 1)
+    directions = rng_proj.standard_normal((n_projections, dim))
+    directions /= np.linalg.norm(directions, axis=1, keepdims=True)
+
+    sw2_sq = 0.0
+    for omega in directions:
+        a_sorted = np.sort(abc_joint @ omega)
+        b_sorted = np.sort(ref_joint @ omega)
+        sw2_sq += np.mean((a_sorted - b_sorted) ** 2)
+    sw2_sq /= n_projections
+    return float(np.sqrt(sw2_sq))
+
+
+def add_sw2_floor_line(ax, sw2_floor):
+    """Add a horizontal dashed line for SW2(true, true)."""
+    ax.axhline(sw2_floor, color="gray", linestyle=":", linewidth=1.2,
+               label=r"$\mathrm{SW}_2$(true, true)", zorder=0)
 
 
 # -- Main ---------------------------------------------------------------------
@@ -124,6 +157,17 @@ def main():
     jl = joint_ylabel(jk)
     log_y_joint = jk != "score_joint"
 
+    # -- SW2 floor (MC noise) -------------------------------------------------
+    sw2_floor = None
+    exp_setup = meta.get("experiment_setup", {})
+    model_obj = exp_setup.get("model") or meta.get("model")
+    y_obs_obj = exp_setup.get("y_obs") or meta.get("y_obs")
+    N_particles = meta.get("N_particles", args.N_particles)
+    if model_obj is not None and y_obs_obj is not None:
+        print(f"Computing SW2(true, true) floor for N={N_particles}...")
+        sw2_floor = compute_sw2_floor(model_obj, y_obs_obj, N_particles)
+        print(f"  SW2 floor = {sw2_floor:.4f}")
+
     # -- Metric definitions ----------------------------------------------------
     x_axes = [
         ("n_sim",   r"$N_{\mathrm{sim}}$ (per 1000 unique)"),
@@ -150,6 +194,8 @@ def main():
     for idx, (xk, yk, xl, yl, ly) in enumerate(panels):
         row, col = divmod(idx, 3)
         plot_method_panel(axes[row, col], records, methods, xk, yk, xl, yl, log_y=ly)
+        if yk == "sw2_joint" and sw2_floor is not None:
+            add_sw2_floor_line(axes[row, col], sw2_floor)
         if row == 0 and col == 0:
             axes[row, col].legend(fontsize=8, loc="best")
 
@@ -164,6 +210,8 @@ def main():
         tag = f"{yk}_vs_{x_short[xk]}"
         fig_s, ax_s = plt.subplots(figsize=(7, 5))
         plot_method_panel(ax_s, records, methods, xk, yk, xl, yl, log_y=ly)
+        if yk == "sw2_joint" and sw2_floor is not None:
+            add_sw2_floor_line(ax_s, sw2_floor)
         ax_s.legend(fontsize=9)
         fig_s.tight_layout()
         save_figure(fig_s, figures_dir / f"fig4bis_{tag}_K_{K}_seed_{seed}.pdf")
@@ -190,6 +238,8 @@ def main():
         for idx, (xk, yk, xl, yl, ly) in enumerate(raw_panels):
             row, col = divmod(idx, 3)
             plot_method_panel(axes_r[row, col], records, methods, xk, yk, xl, yl, log_y=ly)
+            if yk == "sw2_joint" and sw2_floor is not None:
+                add_sw2_floor_line(axes_r[row, col], sw2_floor)
             if row == 0 and col == 0:
                 axes_r[row, col].legend(fontsize=8, loc="best")
         for idx in range(len(raw_panels), n_raw_rows * 3):
