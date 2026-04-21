@@ -1,3 +1,24 @@
+\section{Vanilla ABC Algorithm}
+\label{appendix_vanilla_abc}
+
+For completeness, we recall the standard rejection ABC algorithm \citep{marinApproximateBayesianComputational2012a}.
+
+\begin{algorithm}
+\label{alg:abc_vanilla}
+\caption{Vanilla Approximate Bayesian Computation}
+\textbf{Input: }observed dataset $\obsdata$, number of iterations $N$, threshold $\eps>0$, summary statistic $\eta$.\\
+\textbf{Output: }a sample $(\param^{(1)}, \dots, \param^{(N)})$ from $\pi_\eps\{\cdot\mid\eta(\obsdata)\}$.\\
+
+\BlankLine
+
+\For{$i = 1,\dots, N$}{
+    \Repeat{$d\{\eta(\simdata^{(i)}),\eta(\obsdata)\})\leq \eps$}{
+        $\param^{(i)} \sim \pi(\cdot)$\;
+        $\simdata^{(i)}\sim f(\cdot\mid\param^{(i)})$\;
+        }
+    }
+\end{algorithm}
+
 \section{Stratified version of permABC}
 \label{sec:appendix_strat}
 
@@ -206,6 +227,69 @@ By Theorem~\ref{th:permABC_star}, we have $\pi^*_{\varepsilon}(\cdot \mid \obsda
 \section{Technical Details for Over-Sampling}
 \label{appendix_os}
 
+\subsection{Asymptotic analysis: \( M \to \infty \)}
+\label{appendix_os_asymptotics}
+
+\new{We provide here the full derivation of the \( M\to\infty \) limit stated in Section~\ref{sec:permABC_OS}. Define}
+\begin{equation}
+    d_M(\obsdata,\simdata_{1:M})
+    :=
+    \min_{\sigma \in \mathcal{A}_K^M} d(\obsdata,\simdata_\sigma),
+\end{equation}
+\new{and, for fixed \( \globparam \), let}
+\begin{equation}
+    g_{\globparam}(z)
+    :=
+    \int g(z \mid \globparam,\mu)\,\pi(d\mu),
+    \qquad
+    S_{\globparam}
+    :=
+    \operatorname{supp}(g_{\globparam}).
+\end{equation}
+\new{We introduce the support-based discrepancy}
+\begin{equation}
+    \delta_{\globparam}(\obsdata)
+    :=
+    \inf_{x_{1:K}\in S_{\globparam}^K} d(\obsdata,x_{1:K}).
+\end{equation}
+\new{Under mild regularity assumptions on \( d \), if \( Z_1,\dots,Z_M \mid \globparam \stackrel{\text{i.i.d.}}{\sim} g_{\globparam} \), then}
+\begin{equation}
+    d_M(\obsdata,Z_{1:M})
+    \xrightarrow[M\to\infty]{a.s.}
+    \delta_{\globparam}(\obsdata).
+\end{equation}
+\new{Hence, for every \( \varepsilon \) away from the boundary case \( \delta_{\globparam}(\obsdata)=\varepsilon \),}
+\begin{equation}
+    \mathbb{P}_{\globparam}\!\Bigl(
+        d_M(\obsdata,Z_{1:M}) \le \varepsilon
+    \Bigr)
+    \xrightarrow[M\to\infty]{}
+    \mathbf{1}\!\left\{
+        \delta_{\globparam}(\obsdata)\le \varepsilon
+    \right\}.
+\end{equation}
+\new{Therefore the marginal Over-Sampling pseudo-posterior on the global parameter satisfies}
+\begin{equation}
+    \tilde{\pi}_\varepsilon^M(\globparam \mid \obsdata)
+    \propto
+    \pi(\globparam)\,
+    \mathbb{P}_{\globparam}\!\Bigl(
+        d_M(\obsdata,Z_{1:M}) \le \varepsilon
+    \Bigr)
+    \xrightarrow[M\to\infty]{}
+    \pi(\globparam)\,
+    \mathbf{1}\!\left\{
+        \delta_{\globparam}(\obsdata)\le \varepsilon
+    \right\}.
+\end{equation}
+\new{In particular, if \( \delta_{\globparam}(\obsdata)=0 \) for every \( \globparam \) in the support of the prior, then for every \( \varepsilon>0 \),}
+\begin{equation}
+    \tilde{\pi}_\varepsilon^M(\globparam \mid \obsdata)
+    \xrightarrow[M\to\infty]{}
+    \pi(\globparam).
+\end{equation}
+\new{Thus, infinite Over-Sampling destroys all information on the global parameter: the ABC acceptance event only measures whether the observed data lie in the support of the local marginal model. By contrast, the pushforward map \( \Psi_{\obsdata}^{(M)} \) retains the \(K\) matched local parameters \( \locparam_{\sigma^*(1:K)} \), which become concentrated around good matching values even when the marginal in \( \globparam \) is nearly flat. As \( M \) decreases back to \( K \), this degeneracy disappears and \( \pi_\varepsilon^{*M} \) connects back to the standard permABC pseudo-posterior. This \(M\to\infty\) regime is qualitatively different from---and does not commute with---the large-\(K\) Wasserstein-style asymptotics of Section~\ref{sec:asymptotics_K}: the inferential target is recovered only at \(M=K\), and Over-Sampling is therefore best viewed as an algorithmic bridge rather than an asymptotic regime to push.}
+
 \subsection{Formal Definition of \( \pi^{*M}_\varepsilon \)}
 
 Given a dataset \( \obsdata \in \dataspace^K \), the Over-Sampling acceptance condition selects particles whose associated simulated data \( \simdata \in \dataspace^M \) satisfy the constraint:
@@ -380,24 +464,24 @@ Randomly partition $\{1, \dots, K\}$ into $H$ blocks $(B_1, \dots, B_H)$ \\
 
 In this appendix, we complement the results presented in Sections~\ref{sec:gaussian_toy} and~\ref{sec:osum} by providing a joint comparison of ABC methods in terms of both simulation count and wall-clock time. These two metrics offer complementary perspectives on computational efficiency: the former captures algorithmic convergence speed, while the latter reflects the actual computational cost, including assignment resolution and data simulation.
 
-Figure~\ref{fig:appendix_time_gaussian} displays the total runtime required to reach a given tolerance \( \varepsilon \) for the hierarchical Gaussian model described in Equation~\eqref{eqgauss}, measured on a single-core CPU using identical implementation settings. The conclusions are consistent with those drawn from the simulation-count analysis in Figure~\ref{fig:vanilla_vs_smc}: permutation-based strategies reach lower tolerance levels more efficiently, and this advantage becomes increasingly significant as the number of compartments \( K \) increases.
+\new{Figure~\ref{fig:appendix_time_gaussian} displays the total runtime required to reach a given sliced Wasserstein-2 distance to the reference posterior, for the hierarchical Gaussian model described in Equation~\eqref{eqgauss}, measured on a single-core CPU using identical implementation settings. The conclusions are consistent with those drawn from the simulation-count analysis in Figure~\ref{fig:vanilla_vs_smc}: permutation-based strategies reach lower \( \mathrm{SW}_{2} \) levels more efficiently, and this advantage becomes increasingly significant as the number of compartments \( K \) increases.}
 
 \begin{figure}[htbp]
     \centering
-    \includegraphics[scale=.4]{fig/fig4_time_seed_42.pdf}
+    \includegraphics[scale=.5]{fig/fig4_sw2_time_seed_43.pdf}
     \caption{
-        Comparison of standard ABC methods and permutation-based variants on the Gaussian toy model, in terms of achieved tolerance \( \varepsilon \) versus wall-clock time. The \( x \)-axis shows the total runtime per 1,000 unique accepted particles (log-scale), and the \( y \)-axis represents the effective tolerance \( \varepsilon \) (log-scale). Permutation-based methods consistently outperform standard ABC in terms of both accuracy and computational cost.
+        \new{Comparison of standard ABC methods and permutation-based variants on the Gaussian toy model, in terms of the sliced Wasserstein-2 distance to the reference posterior versus wall-clock time. The \( x \)-axis shows the total runtime per 1{,}000 unique accepted particles (log-scale), and the \( y \)-axis represents \( \mathrm{SW}_{2} \) (log-scale). Permutation-based methods consistently outperform standard ABC in terms of both accuracy and computational cost.}
     }
     \label{fig:appendix_time_gaussian}
 \end{figure}
 
-In the outlier-robustness setting discussed in Section~\ref{sec:osum}, Figure~\ref{fig:osum} reports the wall-clock time required to reach various tolerance levels. For completeness, we reproduce here the complementary figure comparing the same methods in terms of simulation count. The results confirm the improved sampling efficiency of Over-Sampling and Under-Matching strategies, particularly in the intermediate- and low-tolerance regimes.
+\new{In the outlier-robustness setting discussed in Section~\ref{sec:osum}, Figure~\ref{fig:osum} reports the wall-clock time required to reach various \( \mathrm{SW}_{2} \) levels. For completeness, we reproduce here the complementary figure comparing the same methods in terms of simulation count. The results confirm the improved sampling efficiency of Over-Sampling and Under-Matching strategies, particularly in the intermediate- and low-tolerance regimes.}
 
 \begin{figure}[htbp]
     \centering
-    \includegraphics[scale=.4]{fig/fig6_nsim_seed_42.pdf}
+    \includegraphics[scale=.5]{fig/fig6_sw2_nsim_seed_43.pdf}
     \caption{
-        Complementary comparison of ABC methods in terms of simulation count for the outlier-robustness scenario. The \( x \)-axis shows the total number of simulations per 1,000 unique accepted particles (log-scale), and the \( y \)-axis represents the effective tolerance \( \varepsilon \) (log-scale). Over-Sampling and Under-Matching improve sampling efficiency while maintaining robustness to model misspecification.
+        \new{Complementary comparison of ABC methods in terms of simulation count for the outlier-robustness scenario. The \( x \)-axis shows the total number of simulations per 1{,}000 unique accepted particles (log-scale), and the \( y \)-axis represents the sliced Wasserstein-2 distance to the reference posterior (log-scale). Over-Sampling and Under-Matching improve sampling efficiency while maintaining robustness to model misspecification.}
     }
     \label{fig:appendix_simcount}
 \end{figure}
@@ -415,3 +499,21 @@ Before applying permABC to the full departmental dataset, we performed a prelimi
 This empirical observation supports the use of a global \( R_0 \) parameter shared across all compartments, while allowing for department-specific local parameters \( \locparam_k = (I_k(0), R_k(0), \delta_k) \).
 
 The spatial distribution of \( \delta_k \) reflects variations in local factors such as population density, urbanization, mobility, or healthcare capacity. These differences highlight the necessity of treating local parameters separately in a hierarchical framework, rather than aggregating data at the national level.
+
+\subsection{Synthetic Data Validation}
+\label{appendix_sir_synthetic}
+
+\new{To verify that permABC-SMC can recover known ground-truth parameters in the SIR setting, we generate synthetic data from the model described in Section~3.5 of the main text. We draw \( K=10 \) compartments with true parameters sampled from realistic subregions of the prior: \( R_0 \in [1.5,3.0] \), \( \nu_k \in [0.1,0.5] \), \( I_k(0) \in [1,200] \), and \( R_k(0) \in [0.1,50] \). We then simulate \( n=120 \) days of observations using the stochastic SIR simulator with log-normal noise.
+
+We run permABC-SMC with \( N=1{,}000 \) particles on the synthetic data for three values of the noise parameter: \( \sigma \in \{0.01, 0.05, 0.10\} \). This serves two purposes: (i)~validating that permABC-SMC recovers the true parameters when they are known, and (ii)~assessing the sensitivity of the inference to the choice of~\( \sigma \).
+
+Figure~\ref{fig:sir_synthetic} displays the results. The top row shows the posterior of~\( R_0 \) for each~\( \sigma \): in all three cases, the posterior is concentrated around the true value, confirming that the global parameter is well recovered. The middle row shows the marginal posteriors of four local recovery rates~\( \nu_k \), each centered on the corresponding true value. The bottom row presents posterior predictive checks: 90\% and 50\% credible envelopes of simulated trajectories are compared to the synthetic observed data, showing good calibration.
+
+The sensitivity to \( \sigma \) is as expected: smaller values produce tighter posteriors (the model is less noisy, so the data are more informative), while larger values yield wider posteriors. The choice \( \sigma=0.05 \) used in the real-data application (Section~3.5 of the main text) provides a reasonable trade-off between model flexibility and inferential precision.}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=\textwidth]{fig/fig_sir_synthetic_validation_seed_42.pdf}
+    \caption{\new{Synthetic validation of permABC-SMC on the SIR model (\( K=10 \) compartments). Top: posterior of \( R_0 \) for \( \sigma \in \{0.01, 0.05, 0.10\} \); dashed red line marks the true value. Middle: posteriors of four local recovery rates \( \nu_k \) (\( \sigma=0.05 \)). Bottom: posterior predictive checks---envelopes (50\% dark, 90\% light) of simulated trajectories vs.\ synthetic observed data (solid black). The method recovers the true parameters in all cases.}}
+    \label{fig:sir_synthetic}
+\end{figure}
