@@ -160,8 +160,8 @@ def main():
     # -- SW2 floor (MC noise) -------------------------------------------------
     sw2_floor = None
     exp_setup = meta.get("experiment_setup", {})
-    model_obj = exp_setup.get("model") or meta.get("model")
-    y_obs_obj = exp_setup.get("y_obs") or meta.get("y_obs")
+    model_obj = exp_setup.get("model") if exp_setup.get("model") is not None else meta.get("model")
+    y_obs_obj = exp_setup.get("y_obs") if exp_setup.get("y_obs") is not None else meta.get("y_obs")
     N_particles = meta.get("N_particles", args.N_particles)
     if model_obj is not None and y_obs_obj is not None:
         print(f"Computing SW2(true, true) floor for N={N_particles}...")
