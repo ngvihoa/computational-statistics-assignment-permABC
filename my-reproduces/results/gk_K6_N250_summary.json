@@ -1,0 +1,30 @@
+{
+  "summary": {
+    "perm": {
+      "runs": 3,
+      "mae_global_mean": 0.3751245711240215,
+      "mae_global_std": 0.006751089465862721,
+      "mae_local_mean_mean": 0.20980915995659877,
+      "mae_local_mean_std": 0.05308484921060094,
+      "runtime_sec_mean": 0.45851318041483563,
+      "runtime_sec_std": 0.31849124835647447,
+      "n_sim_total_mean": 8262.0,
+      "n_sim_total_std": 0.0,
+      "eps_final_mean": 6.99251906611751,
+      "eps_final_std": 0.4627695969972899
+    },
+    "smc": {
+      "runs": 3,
+      "mae_global_mean": 0.3899427330362837,
+      "mae_global_std": 0.03198599994381535,
+      "mae_local_mean_mean": 0.16690481904477297,
+      "mae_local_mean_std": 0.02107021934259487,
+      "runtime_sec_mean": 0.09931008021036784,
+      "runtime_sec_std": 0.10620882955710245,
+      "n_sim_total_mean": 7050.0,
+      "n_sim_total_std": 0.0,
+      "eps_final_mean": 8.483734939734216,
+      "eps_final_std": 0.4063044493837351
+    }
+  }
+}
