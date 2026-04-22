@@ -197,8 +197,13 @@ def run_vanilla_methods(key, model, N_points, y_obs):
     return key, results
 
 
-def run_smc_methods(key, model, N_particles, y_obs, stopping_rate, N_points, K):
-    """Run SMC-based ABC methods (ABC-SMC + permABC-SMC)."""
+def run_smc_methods(key, model, N_particles, y_obs, stopping_rate, N_points, K,
+                    out_perm_pilot=None):
+    """Run SMC-based ABC methods (ABC-SMC + permABC-SMC).
+
+    If out_perm_pilot is provided (from budget discovery), it is reused as the
+    permABC-SMC result instead of running it a second time.
+    """
     kernel = KernelTruncatedRW
     results = {}
 
@@ -213,16 +218,20 @@ def run_smc_methods(key, model, N_particles, y_obs, stopping_rate, N_points, K):
     )
     results['abc_smc'] = out_smc
 
-    # permABC SMC
-    print("Running permABC SMC...")
-    key, subkey = random.split(key)
-    model.reset_weights_distance()
-    out_perm_smc = perm_abc_smc(
-        key=subkey, model=model, n_particles=N_particles, epsilon_target=0, y_obs=y_obs,
-        kernel=kernel, verbose=1, Final_iteration=0, update_weights_distance=False,
-        stopping_accept_rate=stopping_rate, N_sim_max=N_points*K
-    )
-    results['perm_abc_smc'] = out_perm_smc
+    # permABC SMC — reuse budget discovery run if available
+    if out_perm_pilot is not None:
+        print("Reusing permABC-SMC from budget discovery (no double run).")
+        results['perm_abc_smc'] = out_perm_pilot
+    else:
+        print("Running permABC SMC...")
+        key, subkey = random.split(key)
+        model.reset_weights_distance()
+        out_perm_smc = perm_abc_smc(
+            key=subkey, model=model, n_particles=N_particles, epsilon_target=0, y_obs=y_obs,
+            kernel=kernel, verbose=1, Final_iteration=0, update_weights_distance=False,
+            stopping_accept_rate=stopping_rate, N_sim_max=N_points*K
+        )
+        results['perm_abc_smc'] = out_perm_smc
 
     return key, results
 
@@ -1041,6 +1050,9 @@ def parse_arguments():
                         help='Output directory (default: experiments)')
     parser.add_argument('--rerun', type=str, default=None,
                         help='Path to pickle or CSV file for rerunning analysis')
+    parser.add_argument('--stop-rate', type=float, default=0.0,
+                        help='Stopping acceptance rate for SMC. When > 0, permABC-SMC '
+                             'runs first with N_sim_max=inf to set the budget for all methods.')
 
     parser.set_defaults(include_osum=True)
     return parser.parse_args()
@@ -1113,6 +1125,27 @@ def main():
         N_points=args.N_points, N_particles=args.N_particles
     )
 
+    # Override stopping_rate from CLI if provided
+    if args.stop_rate > 0:
+        stopping_rate = args.stop_rate
+
+    # When stop_rate > 0: run permABC-SMC first with N_sim_max=inf to determine budget
+    # This run is reused as the permABC-SMC result (no double run).
+    out_perm_pilot = None
+    if stopping_rate > 0 and run_smc:
+        print(f"\n*** Budget discovery: running permABC-SMC with stop_rate={stopping_rate}, N_sim_max=inf ***")
+        kernel = KernelTruncatedRW
+        key, subkey = random.split(key)
+        model.reset_weights_distance()
+        out_perm_pilot = perm_abc_smc(
+            key=subkey, model=model, n_particles=N_particles, epsilon_target=0, y_obs=y_obs,
+            kernel=kernel, verbose=1, Final_iteration=0, update_weights_distance=False,
+            stopping_accept_rate=stopping_rate, N_sim_max=np.inf
+        )
+        budget_comp_sims = int(np.sum(out_perm_pilot["N_sim"]))
+        N_points = budget_comp_sims // K
+        print(f"*** permABC-SMC budget: {budget_comp_sims:,} comp-sims → N_points={N_points:,} ***\n")
+
     vanilla_results = None
     smc_results = {}
     osum_results = None
@@ -1122,7 +1155,8 @@ def main():
 
     if run_smc:
         key, smc_results = run_smc_methods(
-            key, model, N_particles, y_obs, stopping_rate, N_points, K
+            key, model, N_particles, y_obs, stopping_rate, N_points, K,
+            out_perm_pilot=out_perm_pilot,
         )
 
     if run_pmc:
