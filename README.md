@@ -175,8 +175,6 @@ Sau khi chạy, kết quả thường nằm ở:
 
 ## Citing permABC
 
-If you use `permABC` in your research, please cite our paper:
-
 ```bibtex
 @misc{luciano2025permutationsaccelerateapproximatebayesian,
       title={Permutations accelerate Approximate Bayesian Computation}, 
