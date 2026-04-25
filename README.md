@@ -1,115 +1,177 @@
-# permABC: Permutation-based Approximate Bayesian Computation
+# permABC: Setup và hướng dẫn chạy my-reproduces
 
 [![arXiv](https://img.shields.io/badge/arXiv-2507.06037-b31b1b.svg)](https://www.arxiv.org/abs/2507.06037)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-<p align="center">
-  <img width="300" height="300" alt="permABC_logo" src="https://github.com/user-attachments/assets/cca21c43-e06f-4d93-a06e-740d551f73a6" />
-</p>
+Tài liệu này tập trung vào cách setup và chạy các script trong thư mục `my-reproduces/` để tái lập các thí nghiệm simulation và real-world weather.
 
-`permabc` is a Python package implementing a suite of Approximate Bayesian Computation (ABC) algorithms enhanced with permutation strategies to handle non-identifiability in multi-component models. It includes implementations of **permABC-SMC**, as well as novel **Over-Sampling** and **Under-Matching** variants designed to improve exploration and efficiency.
+## 1) Yêu cầu
 
-This library is the official implementation for the paper: **[Permutations accelerate Approximate Bayesian Computation](https://www.arxiv.org/abs/2507.06037)**.
+- Python 3.9+ (khuyến nghị 3.10/3.11)
+- pip mới
 
-## Key Features
 
-* **PermABC-SMC**: Core algorithm to resolve label switching using optimal transport (`perm_abc_smc`).
-* **Over-sampling (OS)**: An innovative strategy (`perm_abc_smc_os`) that simulates more components than observed to improve parameter recovery.
-* **Under-matching (UM)**: An efficient strategy (`perm_abc_smc_um`) that starts by matching a subset of components and progressively increases the complexity.
-* **Advanced MCMC Moves**: Includes standard and block-wise Gibbs moves for efficient particle updates.
-* **Modern Backend**: Built on `JAX` for high-performance, JIT-compiled computations.
-* **Extensible**: Easily adaptable to new statistical models.
+## 2) Setup môi trường
 
-## Installation
+Từ thư mục gốc repository:
 
-First, clone the repository:
 ```bash
-git clone [https://github.com/votre_nom_utilisateur/permabc.git](https://github.com/votre_nom_utilisateur/permabc.git)
-cd permabc
-```
+python3 -m venv .venv
+source .venv/bin/activate
 
-Then, install the package and its dependencies. For development, it's recommended to use an editable install:
-```bash
+pip install --upgrade pip
 pip install -r requirements.txt
 pip install -e .
 ```
 
-## Quick Start: A 3-Compartment Gaussian Model
+Kiểm tra import nhanh:
 
-Here is a minimal example of how to use `perm_abc_smc` on a Gaussian mixture model.
-
-```python
-import jax
-import jax.numpy as jnp
-import numpy as np
-
-# 1. Import the model and algorithm
-from permabc.models import GaussianWithNoSummaryStats
-from permabc.algorithms import perm_abc_smc
-from permabc.core import KernelTruncatedRW
-
-# 2. Setup the model and generate observed data
-key = jax.random.PRNGKey(42)
-K = 3  # Number of components
-n_obs_per_comp = 50
-model = GaussianWithNoSummaryStats(K=K, n_obs=n_obs_per_comp)
-
-# Generate some true parameters and observed data
-key, key_true_params, key_obs_data = jax.random.split(key, 3)
-true_thetas = model.prior_generator(key_true_params, n_particles=1)
-y_obs = model.data_generator(key_obs_data, true_thetas)
-
-# 3. Configure and run the ABC-SMC algorithm
-n_particles = 500
-epsilon_target = 1.0
-
-results = perm_abc_smc(
-    key=key,
-    model=model,
-    n_particles=n_particles,
-    epsilon_target=epsilon_target,
-    y_obs=y_obs,
-    kernel=KernelTruncatedRW,
-    verbose=1
-)
-
-# 4. Analyze the results
-final_thetas = results['Thetas'][-1]
-final_weights = results['Weights'][-1]
-
-# Posterior mean for the global variance (sigma^2)
-posterior_mean_sigma2 = np.average(final_thetas.glob, weights=final_weights)
-print(f"True sigma^2: {true_thetas.glob[0, 0]:.4f}")
-print(f"Posterior mean for sigma^2: {posterior_mean_sigma2:.4f}")
-```
-
-## Reproducing Paper Results
-
-The experiments from the paper can be reproduced using the scripts located in the `experiments/` directory.
-
-### Structure of the `experiments` Directory
-
-* [cite_start]**`data/`**: Contains the raw data files (CSV) used for the experiments, notably population and hospitalization data for the SIR analysis. [cite: 1]
-* [cite_start]**`notebooks/`**: Jupyter Notebooks for exploration, analysis, and interactive visualization of results. [cite: 1]
-* **`results/`**: The directory where simulation results (`.pkl`) are saved. [cite_start]The figure scripts read from this directory to avoid re-running calculations. [cite: 1]
-* [cite_start]**`scripts/`**: Contains the main Python scripts to run experiments and generate figures. [cite: 1]
-    * [cite_start]**`run_*.py`**: Main scripts that perform the inferences (e.g., `run_performance_comparison.py`). 
-    * **`figures/`**: Scripts dedicated to generating each figure from the paper (e.g., `fig2_over_sampling_posterior.py`). 
-
-### How to Generate Figures
-
-All figures can be regenerated by running their corresponding script from the project root. The scripts are designed to first check if the result data exists. If not, they will automatically run the necessary simulations. 
-
-The commands below use the random seed `seed=42`, as in the paper.
-
-
-**To generate all figures at once:**
-A shell script is provided to run all figure generations sequentially. 
 ```bash
-chmod +x regenerate_all_figures.sh
-./regenerate_all_figures.sh
+python3 -c "import permabc; print(permabc.get_version())"
 ```
 
+## 3) Cấu trúc thư mục my-reproduces
+
+- `my-reproduces/data/`: dữ liệu đầu vào (vd: `df_weather_clean.csv`)
+- `my-reproduces/results/`: nơi lưu kết quả CSV/JSON/figure
+- `my-reproduces/scripts_simulation/`: benchmark simulation
+- `my-reproduces/scripts_real_world/`: inference trên dữ liệu thời tiết thực
+
+## 4) Chạy benchmark simulation
+
+### 4.1 Chạy benchmark chính
+
+Script:
+- `my-reproduces/scripts_simulation/run_performance_comparison_simulation.py`
+
+Ví dụ full benchmark:
+
+```bash
+python3 my-reproduces/scripts_simulation/run_performance_comparison_simulation.py \
+  --methods all \
+  --K 20 \
+  --K-outliers 4 \
+  --seed 42 \
+  --prefix perf_compare_like_experiments_K20
+```
+
+Ví dụ smoke test nhanh:
+
+```bash
+python3 my-reproduces/scripts_simulation/run_performance_comparison_simulation.py \
+  --methods all \
+  --K 8 \
+  --K-outliers 2 \
+  --seed 42 \
+  --n-points 10000 \
+  --n-particles 200 \
+  --n-sim-budget 100000 \
+  --n-epsilon 1000 \
+  --m0-values 12 16 24 \
+  --l0-values 2 4 6 8 \
+  --prefix smoke_perf_compare_all_fast
+```
+
+Tùy chọn quan trọng:
+- `--methods`: `all|vanilla|smc|pmc|osum`
+- `--output-dir` (mặc định: `my-reproduces/results/simulation`)
+- `--plot-after-run` / `--no-plot-after-run`
+
+### 4.2 Vẽ lại hình từ CSV đã có
+
+Script:
+- `my-reproduces/scripts_simulation/plot_performance_comparison_simulation.py`
+
+Ví dụ:
+
+```bash
+python3 my-reproduces/scripts_simulation/plot_performance_comparison_simulation.py \
+  --prefix perf_compare_like_experiments_K20
+```
+
+Hoặc chỉ định CSV cụ thể:
+
+```bash
+python3 my-reproduces/scripts_simulation/plot_performance_comparison_simulation.py \
+  --csv my-reproduces/results/simulation/perf_compare_like_experiments_K20.csv
+```
+
+## 5) Chạy real-world weather inference
+
+### 5.1 Kiểm tra model Bernoulli-logit trước khi chạy dài
+
+Script:
+- `my-reproduces/scripts_real_world/validate_bernoulli_model.py`
+
+```bash
+python3 my-reproduces/scripts_real_world/validate_bernoulli_model.py
+```
+
+### 5.2 Chạy inference trên dữ liệu thời tiết
+
+Script:
+- `my-reproduces/scripts_real_world/run_weather_rain_probability.py`
+
+Ví dụ đầy đủ:
+
+```bash
+python3 my-reproduces/scripts_real_world/run_weather_rain_probability.py \
+  --seed 42 \
+  --scales national regional provincial \
+  --n_particles 1000 \
+  --final_iteration 100 \
+  --num_gibbs_blocks 3 \
+  --gibbs_T 1000 \
+  --gibbs_M_loc 50 \
+  --gibbs_M_glob 100 \
+  --max_days 0
+```
+
+Tùy chọn quan trọng:
+- `--data_csv` (mặc định: `my-reproduces/data/df_weather_clean.csv`)
+- `--results_dir` (mặc định: `my-reproduces/results/weather_rain_inference`)
+- `--methods` để chọn subset phương pháp
+
+### 5.3 Vẽ hình từ kết quả đã lưu
+
+Script:
+- `my-reproduces/scripts_real_world/plot_weather_rain_probability.py`
+
+Ví dụ:
+
+```bash
+python3 my-reproduces/scripts_real_world/plot_weather_rain_probability.py \
+  --seed 42 \
+  --scales national regional provincial
+```
+
+Thêm diagnostic figure:
+
+```bash
+python3 my-reproduces/scripts_real_world/plot_weather_rain_probability.py \
+  --seed 42 \
+  --scale regional \
+  --include_extra
+```
+
+## 6) Thư mục kết quả
+
+Sau khi chạy, kết quả thường nằm ở:
+- `my-reproduces/results/simulation/`
+  - `*.csv`, `*_summary.json`, `figures_performance/*.png`
+- `my-reproduces/results/weather_rain_inference/`
+  - file kết quả theo method/scale/seed
+  - `comparison_weather_rain_seed_*.csv`
+  - `figures/*.png`
+
+## 7) Lỗi thường gặp
+
+- Không import được `permabc`:
+  - đảm bảo đã chạy `pip install -e .`
+- Lỗi khi vẽ hình trên môi trường headless:
+  - các script đã set backend phù hợp (`Agg`), thử chạy lại trong shell sạch
+- Chạy chậm hoặc memory cao:
+  - giảm `--n-particles`, `--n-points`, `--n-epsilon`
 
 ## Citing permABC
 
