@@ -1,17 +1,19 @@
 """
-Bernoulli logit model with weather covariates.
+Mô hình Bernoulli-logit với biến giải thích thời tiết.
 
-This module implements a hierarchical logistic regression model where:
-- Global parameters (beta) model feature effects across all components
-- Local parameters (alpha_k) model component-specific intercepts
-- Used for estimating rain probability given weather features
+Mô-đun này triển khai một mô hình logistic phân cấp, trong đó:
+- Tham số toàn cục (beta) mô tả tác động của các đặc trưng
+- Tham số cục bộ (alpha_k) mô tả intercept riêng cho từng thành phần
+- Dùng để ước lượng xác suất mưa từ các biến thời tiết
 """
 
+import jax
 import jax.numpy as jnp
-from jax import random, vmap
+from jax import random
+from scipy.optimize import linear_sum_assignment
 from scipy.stats import norm
 import numpy as np
-from scipy.special import expit, logit
+from scipy.special import expit
 
 # Import from package structure
 try:
@@ -93,54 +95,64 @@ class BernoulliLogitWithCovariates(ModelBase):
                 f"X_cov shape {self.X_cov.shape} does not match expected (K={K}, n_obs={n_obs}, n_features={n_features})"
             )
         
-        # Parameter support ranges
-        self.support_par_loc = jnp.array([[-jnp.inf, jnp.inf]])  # α_k can be any real
-        self.support_par_glob = jnp.array([[-jnp.inf, jnp.inf]] * n_features)  # β_j can be any real
-        
-        # Parameter dimensions and names for plotting/display
-        self.dim_loc = 1  # α_k is a scalar per component
-        self.dim_glob = n_features  # β_j is a vector per feature
-        self.loc_name = ["$\\alpha_{"]  # LaTeX name for local parameters (intercepts)
-        self.glob_name = [f"$\\beta_{{{i}}}$" for i in range(n_features)]  # LaTeX names for coefficients
+        # Miền giá trị tham số
+        self.support_par_loc = jnp.array([[-jnp.inf, jnp.inf]])  # alpha_k có thể nhận mọi giá trị thực
+        self.support_par_glob = jnp.array([[-jnp.inf, jnp.inf]] * n_features)  # beta_j có thể nhận mọi giá trị thực
+
+        # Kích thước tham số và tên hiển thị
+        self.dim_loc = 1  # alpha_k là một vô hướng cho mỗi thành phần
+        self.dim_glob = n_features  # beta_j là một vector theo số đặc trưng
+        self.loc_name = ["$\\alpha_{"]  # Tên LaTeX cho tham số cục bộ
+        self.glob_name = [f"$\\beta_{{{i}}}$" for i in range(n_features)]  # Tên LaTeX cho hệ số đặc trưng
     
     def prior_generator(self, key, n_particles, n_silos=0):
         """
-        Generate samples from the prior distribution.
-        
-        Uses NumPy random to avoid JAX recompilation when n_particles varies
-        across SMC iterations.
-        
+        Sinh mẫu từ phân phối prior.
+
+        Dùng NumPy random để tránh JAX recompilation khi số particles thay đổi
+        giữa các vòng SMC.
+
         Parameters
         ----------
         key : jax.random.PRNGKey
-            Random number generator key.
+            Khóa sinh số ngẫu nhiên.
         n_particles : int
-            Number of particles to generate.
+            Số particle cần sinh.
         n_silos : int, default=0
-            Number of components (if 0, defaults to K).
-            
+            Số thành phần (nếu 0 thì mặc định bằng K).
+
         Returns
         -------
         Theta
-            Parameter samples with loc=(n_particles, K, 1) for α_k
-            and glob=(n_particles, n_features) for β_j.
+            Mẫu tham số với loc=(n_particles, K, 1) cho alpha_k
+            và glob=(n_particles, n_features) cho beta_j.
         """
         if n_silos == 0:
             n_silos = self.K
         
         rng = np.random.default_rng(int(key[0]))
         
-        # Sample intercepts α_k ~ Normal(μ_α, σ_α²)
+        # Lấy mẫu intercept alpha_k ~ Normal(mu_alpha, sigma_alpha^2)
         alphas = (
             rng.standard_normal((n_particles, n_silos, 1)) * self.sigma_alpha + self.mu_alpha
         )
         
-        # Sample coefficients β_j ~ Normal(μ_β, σ_β²) for each feature
+        # Lấy mẫu hệ số beta_j ~ Normal(mu_beta, sigma_beta^2) cho từng đặc trưng
         betas = (
             rng.standard_normal((n_particles, self.n_features)) * self.sigma_beta + self.mu_beta
         )
         
         return Theta(loc=alphas, glob=betas)
+
+    def prior_generator_jax(self, key, n_particles, n_silos=0):
+        """Phiên bản prior_generator dùng JAX."""
+        if n_silos == 0:
+            n_silos = self.K
+
+        key, key_alpha, key_beta = random.split(key, 3)
+        alphas = random.normal(key_alpha, shape=(n_particles, n_silos, 1)) * self.sigma_alpha + self.mu_alpha
+        betas = random.normal(key_beta, shape=(n_particles, self.n_features)) * self.sigma_beta + self.mu_beta
+        return alphas, betas
     
     def prior_logpdf(self, thetas):
         """
@@ -172,24 +184,24 @@ class BernoulliLogitWithCovariates(ModelBase):
     
     def data_generator(self, key, thetas):
         """
-        Generate simulated binary observations from the logit model.
-        
-        For each component k and observation i, generates binary rain y_k,i from
-        Bernoulli(logit^{-1}(α_k + X_cov[k,i,:] · β)).
-        
-        Uses NumPy for random generation to avoid JAX JIT recompilation.
-        
+        Sinh quan sát nhị phân mô phỏng từ mô hình logit.
+
+        Với mỗi thành phần k và mỗi quan sát i, ta sinh y_k,i từ
+        Bernoulli(sigmoid(alpha_k + X_cov[k,i,:] · beta)).
+
+        Dùng NumPy để sinh ngẫu nhiên nhằm tránh JAX JIT recompilation.
+
         Parameters
         ----------
         key : jax.random.PRNGKey
-            Random number generator key.
+            Khóa sinh số ngẫu nhiên.
         thetas : Theta
-            Parameter samples with loc=(n_particles, K, 1) and glob=(n_particles, n_features).
-            
+            Mẫu tham số với loc=(n_particles, K, 1) và glob=(n_particles, n_features).
+
         Returns
         -------
         np.ndarray
-            Simulated binary observations of shape (n_particles, K, n_obs).
+            Quan sát nhị phân mô phỏng dạng (n_particles, K, n_obs).
         """
         n_particles = thetas.loc.shape[0]
         n_silos = thetas.loc.shape[1]
@@ -200,22 +212,21 @@ class BernoulliLogitWithCovariates(ModelBase):
         # Create RNG
         rng = np.random.default_rng(int(key[0]))
 
-        # Over-sampling can request more simulated components than observed ones.
-        # Reuse the observed covariate template cyclically so the model can
-        # generate M > K components without changing the external API.
+        # Over-sampling có thể yêu cầu nhiều thành phần mô phỏng hơn số thành phần quan sát.
+        # Lặp vòng template covariate để model vẫn sinh được M > K mà không đổi API ngoài.
         if n_silos == self.K:
             X_cov = self.X_cov
         else:
             component_ids = np.arange(n_silos) % self.K
-            X_cov = self.X_cov[component_ids]
+            X_cov = np.take(self.X_cov, component_ids, axis=0)
         
-        # Compute linear predictor: η_k,i = α_k + X_cov[k,i,:] · β
+        # Tính linear predictor: eta_k,i = alpha_k + X_cov[k,i,:] · beta
         # alphas: (n_particles, K, 1)
         # betas: (n_particles, n_features)
         # X_cov: (K, n_obs, n_features)
         
-        # Expand dimensions for broadcasting:
-        # alphas -> (n_particles, K, 1) 
+        # Mở rộng chiều để broadcast:
+        # alphas -> (n_particles, K, 1)
         # X_cov -> (1, K, n_obs, n_features)
         # betas -> (n_particles, 1, 1, n_features)
         
@@ -223,43 +234,63 @@ class BernoulliLogitWithCovariates(ModelBase):
         betas_expanded = betas[:, np.newaxis, np.newaxis, :]  # (n_particles, 1, 1, n_features)
         alphas_expanded = alphas[:, :, 0]  # (n_particles, n_silos) - extract scalar from last dim
         
-        # Compute feature contribution: (n_particles, 1, 1, n_features) * (1, K, n_obs, n_features)
-        # Result: (n_particles, K, n_obs, n_features), then sum on last axis -> (n_particles, K, n_obs)
+        # Tính phần đóng góp từ đặc trưng: (n_particles, 1, 1, n_features) * (1, K, n_obs, n_features)
+        # Kết quả: (n_particles, K, n_obs, n_features), rồi cộng theo trục cuối -> (n_particles, K, n_obs)
         feature_contribution = np.sum(X_expanded * betas_expanded, axis=-1)  # (n_particles, K, n_obs)
         
-        # Add intercepts: (n_particles, n_silos) + (n_particles, n_silos, n_obs)
+        # Cộng intercept: (n_particles, n_silos) + (n_particles, n_silos, n_obs)
         eta = alphas_expanded[:, :, np.newaxis] + feature_contribution  # (n_particles, K, n_obs)
         probs = expit(eta)  # (n_particles, K, n_obs)
         
-        # Sample binary observations
+        # Sinh quan sát nhị phân
         zs = rng.binomial(1, probs)  # (n_particles, K, n_obs)
         
         return zs.astype(np.float32)
+
+    def data_generator_jax(self, key, thetas_loc, thetas_glob):
+        """Phiên bản data_generator dùng JAX."""
+        n_particles = thetas_loc.shape[0]
+        n_silos = thetas_loc.shape[1]
+
+        if n_silos == self.K:
+            X_cov = jnp.asarray(self.X_cov)
+        else:
+            component_ids = jnp.arange(n_silos) % self.K
+            X_cov = jnp.take(jnp.asarray(self.X_cov), component_ids, axis=0)
+
+        feature_contribution = jnp.sum(
+            X_cov[jnp.newaxis, :, :, :] * thetas_glob[:, jnp.newaxis, jnp.newaxis, :],
+            axis=-1,
+        )
+        eta = thetas_loc[:, :, 0][:, :, jnp.newaxis] + feature_contribution
+        probs = jax.nn.sigmoid(eta)
+        key, key_data = random.split(key)
+        zs = random.bernoulli(key_data, probs).astype(jnp.float32)
+        return zs
     
     def distance_matrices_loc(self, zs, y_obs, M=0, L=0):
         """
-        Compute local pairwise distance matrices for binary outcomes.
-        
-        Uses Hamming distance (number of mismatches) as the cost for assigning
-        simulated components to observed components.
-        
+        Tính ma trận khoảng cách cục bộ cho dữ liệu nhị phân.
+
+        Dùng Hamming distance (số vị trí khác nhau) làm chi phí ghép
+        giữa thành phần mô phỏng và thành phần quan sát.
+
         Parameters
         ----------
         zs : np.ndarray
-            Simulated data of shape (n_particles, M, n_obs).
+            Dữ liệu mô phỏng dạng (n_particles, M, n_obs).
         y_obs : np.ndarray
-            Observed data of shape (1, K, n_obs).
+            Dữ liệu quan sát dạng (1, K, n_obs).
         M : int, default=0
-            Number of simulated components (defaults to K).
+            Số thành phần mô phỏng (mặc định bằng K).
         L : int, default=0
-            Number of components to match (defaults to K).
-            
+            Số thành phần cần ghép (mặc định bằng K).
+
         Returns
         -------
         np.ndarray
-            Distance matrices of shape (n_particles, K, M) containing
-            Hamming distances between observed components (rows) and
-            simulated components (columns).
+            Ma trận khoảng cách dạng (n_particles, K, M), trong đó
+            các hàng là thành phần quan sát và các cột là thành phần mô phỏng.
         """
         if M == 0:
             M = self.K
@@ -268,102 +299,71 @@ class BernoulliLogitWithCovariates(ModelBase):
         
         n_particles = zs.shape[0]
         
-        # Extract observed data for components 0:K
+        # Lấy dữ liệu quan sát cho K thành phần đầu
         y_obs_data = np.asarray(y_obs[0, :self.K, :])  # (K, n_obs)
         
-        # Compute pairwise Hamming distances: cost[j,i] = mismatches between
-        # observed component j and simulated component i.
+        # Tính Hamming distance theo từng thành phần.
+        # Mỗi lỗi lệch được trọng số bởi weights_distance của thành phần quan sát.
         distances = np.zeros((n_particles, self.K, M), dtype=np.float32)
+        comp_weights = np.asarray(self.weights_distance[:self.K], dtype=np.float32)
         
         for p in range(n_particles):
             for j in range(self.K):
                 for i in range(M):
-                    # Hamming distance: number of positions where binary values differ
-                    dist = np.sum(np.abs(zs[p, i, :] - y_obs_data[j, :]))
-                    distances[p, j, i] = dist
+                    # Hamming distance: số vị trí mà giá trị nhị phân khác nhau
+                    mismatch_count = np.sum(np.abs(zs[p, i, :] - y_obs_data[j, :]))
+                    distances[p, j, i] = comp_weights[j] ** 2 * mismatch_count
         
         return distances
     
     def distance_global(self, zs, y_obs):
         """
-        Compute global distance for parameters.
-        
-        For this model, we don't have separate global distance components
-        beyond the local assignments, so return zeros.
-        
-        Parameters
-        ----------
-        zs : np.ndarray
-            Simulated data.
-        y_obs : np.ndarray
-            Observed data.
-            
-        Returns
-        -------
-        np.ndarray
-            Global distance values (zeros).
+        Tính khoảng cách toàn cục cho tham số.
+
+        Với mô hình này, không có thành phần global distance riêng ngoài
+        phần ghép cục bộ, nên trả về vector 0.
         """
         n_particles = zs.shape[0]
         return np.zeros(n_particles, dtype=np.float32)
     
     def distance(self, zs, y_obs):
         """
-        Compute total distance between simulated and observed data.
-        
-        For this model, we use the naive (non-permuted) Hamming distance
-        across all K components.
-        
-        Parameters
-        ----------
-        zs : np.ndarray
-            Simulated data of shape (n_particles, K, n_obs).
-        y_obs : np.ndarray
-            Observed data of shape (1, K, n_obs).
-            
-        Returns
-        -------
-        np.ndarray
-            Distance values for each particle.
+        Tính khoảng cách tổng giữa dữ liệu mô phỏng và quan sát.
+
+        Hàm này có hoán vị component bằng Hungarian để phản ánh đúng
+        cấu trúc exchangeable giữa các thành phần.
         """
-        # Compute normalized Hamming distance (proportion of mismatches)
         y_obs_data = np.asarray(y_obs[0, :self.K, :])  # (K, n_obs)
         n_particles = zs.shape[0]
-        
+        comp_weights = np.asarray(self.weights_distance[:self.K], dtype=np.float32)
+
         distances = np.zeros(n_particles, dtype=np.float32)
         for p in range(n_particles):
-            mismatches = np.sum(np.abs(zs[p, :self.K, :] - y_obs_data))
-            distances[p] = mismatches / (self.K * self.n_obs)  # Normalize
-        
+            cost = np.zeros((self.K, self.K), dtype=np.float32)
+            for j in range(self.K):
+                for i in range(self.K):
+                    mismatch_count = np.sum(np.abs(zs[p, i, :] - y_obs_data[j, :]))
+                    cost[j, i] = (comp_weights[j] ** 2) * mismatch_count
+
+            row_ind, col_ind = linear_sum_assignment(cost)
+            distances[p] = np.sqrt(np.sum(cost[row_ind, col_ind]))
+
         return distances
     
     def summary(self, z):
         """
-        Apply summary transformation to raw data.
-        
-        For binary data, the summary is the identity (no transformation needed).
-        
-        Parameters
-        ----------
-        z : np.ndarray or jnp.ndarray
-            Raw simulated observations.
-            
-        Returns
-        -------
-        jnp.ndarray
-            Same observations (identity transformation).
+        Áp dụng biến đổi summary cho dữ liệu thô.
+
+        Với dữ liệu nhị phân, tóm tắt bằng tỷ lệ mưa theo từng thành phần.
         """
-        return jnp.asarray(z)
+        z = jnp.asarray(z)
+        return jnp.mean(z, axis=-1, keepdims=True)
     
     def set_X_cov(self, X_cov):
         """
-        Update the covariate matrix after initialization.
-        
-        Useful for testing or when covariates are computed after model creation.
-        
-        Parameters
-        ----------
-        X_cov : np.ndarray
-            Covariate matrix of shape (K, n_obs, n_features).
+        Cập nhật ma trận covariate sau khi khởi tạo.
+
+        Hữu ích khi covariate được tính sau lúc tạo model.
         """
         X_cov = np.asarray(X_cov, dtype=np.float32)
         if X_cov.shape != (self.K, self.n_obs, self.n_features):

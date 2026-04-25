@@ -1,2 +1,0 @@
-method,scale,seed,n_iterations,total_n_sim,total_time,wall_time,final_epsilon
-ABC-Gibbs-True,regional,42,500,350000,36.00035588297396,36.01467180252075,194810134.08703074

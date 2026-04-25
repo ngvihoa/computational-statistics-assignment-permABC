@@ -1,37 +1,50 @@
 #!/usr/bin/env python3
 """
-Apply permABC on real-world weather data for rain probability prediction.
+Chạy permABC trên dữ liệu thời tiết thực để suy luận xác suất mưa.
 
-This script follows the same high-level procedure as the real-world SIR runner:
-1) Load and clean real data.
-2) Build observations at multiple scales.
-3) Run permABC-SMC and baselines on each scale.
-4) Save lightweight outputs and a comparison table.
+Quy trình chính của script:
+1) Nạp và làm sạch dữ liệu thực.
+2) Tạo quan sát theo nhiều mức (toàn quốc/vùng/tỉnh).
+3) Chạy permABC-SMC và các baseline cho từng mức.
+4) Lưu kết quả dạng nhẹ (lightweight) và bảng so sánh.
 
-Modeling choice
----------------
-We use BernoulliLogitWithCovariates to model binary rain probability (0/1) 
-across multiple regions/provinces, using 5 normalized weather features as covariates:
+Phần vẽ hình được tách riêng trong plot_weather_rain_probability.py,
+giống workflow SIR real-world (inference và plotting tách riêng).
+
+Lựa chọn mô hình
+----------------
+Dùng BernoulliLogitWithCovariates cho bài toán nhị phân mưa/không mưa (0/1)
+với 5 biến thời tiết đã chuẩn hóa làm biến giải thích:
 - day.maxtemp_c
 - day.maxwind_kph
 - day.totalprecip_mm
 - day.avghumidity
 - day.uv
 
-For each component (province/region/country), we treat the daily binary observations
-as Bernoulli trials with logit-linear probabilities determined by component-specific
-intercepts (alpha_k) and global feature coefficients (beta).
+Mỗi thành phần (tỉnh/vùng/quốc gia) được mô hình hóa bằng Bernoulli-logit,
+trong đó intercept cục bộ là alpha_k và hệ số toàn cục là beta.
+
+Lệnh chạy đầy đủ để so sánh phương pháp:
+python3 my-reproduces/scripts_real_world/run_weather_rain_probability.py \
+    --seed 42 --scales national regional provincial \
+    --n_particles 1000 --final_iteration 100 --num_gibbs_blocks 3 \
+    --gibbs_T 1000 --gibbs_M_loc 50 --gibbs_M_glob 100 --max_days 0
 """
+
+
 
 from __future__ import annotations
 
 import argparse
+import os
 import pickle
 import re
 import sys
 import time as _time
 from pathlib import Path
 from typing import Dict, List, Tuple
+
+os.environ.setdefault("MPLCONFIGDIR", "/tmp/matplotlib")
 
 import numpy as np
 import pandas as pd
@@ -46,9 +59,12 @@ from permabc.algorithms.smc import abc_smc, perm_abc_smc
 from permabc.algorithms.under_matching import perm_abc_smc_um
 from permabc.core.kernels import KernelTruncatedRW
 from permabc.models.bernoulli_logit_with_covariates import BernoulliLogitWithCovariates
+from permabc.utils.functions import Theta
+
+from abc_gibbs_weather import run_gibbs_sampler_weather
 
 
-# Weather feature columns to use as covariates
+# Các cột đặc trưng thời tiết dùng làm biến giải thích
 FEATURE_COLUMNS = [
     "day.maxtemp_c",
     "day.maxwind_kph",
@@ -57,7 +73,7 @@ FEATURE_COLUMNS = [
     "day.uv",
 ]
 
-# Target variable for rain
+# Biến đích cho bài toán mưa
 TARGET_COLUMN = "day.daily_will_it_rain"
 
 
@@ -66,13 +82,14 @@ _METHOD_REGISTRY_TEMPLATE: Dict[str, Dict[str, str]] = {
     "ABC-SMC": {"tag": "abc_smc", "type": "abc_smc"},
     "ABC-SMC (Gibbs {H}b)": {"tag": "abc_smc_g{H}", "type": "abc_smc_gibbs"},
     "permABC-SMC (Gibbs {H}b)": {"tag": "perm_smc_g{H}", "type": "perm_smc_gibbs"},
+    "ABC-Gibbs": {"tag": "abc_gibbs_true", "type": "abc_gibbs_true"},
     "permABC-SMC-OS": {"tag": "perm_smc_os", "type": "perm_smc_os"},
     "permABC-SMC-UM": {"tag": "perm_smc_um", "type": "perm_smc_um"},
 }
 
 
 def expand_registry(num_gibbs_blocks: int) -> Dict[str, Dict[str, str]]:
-    """Expand the method template by replacing {H} with --num_gibbs_blocks."""
+    """Mở rộng tên method bằng cách thay {H} theo --num_gibbs_blocks."""
     registry: Dict[str, Dict[str, str]] = {}
     h_txt = str(num_gibbs_blocks)
 
@@ -88,12 +105,12 @@ def expand_registry(num_gibbs_blocks: int) -> Dict[str, Dict[str, str]]:
 
 
 def slugify(text: str) -> str:
-    """Create a compact ASCII-safe slug for file names."""
+    """Tạo slug gọn, an toàn ASCII để đặt tên file."""
     return re.sub(r"[^a-zA-Z0-9]+", "_", text).strip("_").lower()
 
 
 def load_weather_dataframe(csv_path: Path, country: str) -> pd.DataFrame:
-    """Load weather panel data and validate required columns."""
+    """Nạp dữ liệu panel thời tiết và kiểm tra các cột bắt buộc."""
     if not csv_path.exists():
         raise FileNotFoundError(f"Weather dataset not found: {csv_path}")
 
@@ -104,19 +121,19 @@ def load_weather_dataframe(csv_path: Path, country: str) -> pd.DataFrame:
     if missing_cols:
         raise ValueError(f"Missing required columns in dataset: {missing_cols}")
 
-    # Keep only needed columns
+    # Chỉ giữ các cột cần thiết
     cols_to_keep = ["province", "region", "country", "date"] + FEATURE_COLUMNS + [TARGET_COLUMN]
     df = df[cols_to_keep].copy()
     
-    # Filter by country
+    # Lọc theo quốc gia
     df = df[df["country"] == country].copy()
 
-    # Clean dates and numeric columns
+    # Chuẩn hóa kiểu dữ liệu cho cột ngày và cột số
     df["date"] = pd.to_datetime(df["date"], errors="coerce")
     for col in FEATURE_COLUMNS + [TARGET_COLUMN]:
         df[col] = pd.to_numeric(df[col], errors="coerce")
 
-    # Remove rows with NaNs to avoid issues in pivot matrix
+    # Loại bỏ dòng có NaN để tránh lỗi khi pivot
     df = df.dropna(subset=["date", "province", "region"] + FEATURE_COLUMNS + [TARGET_COLUMN])
     
     if len(df) == 0:
@@ -131,20 +148,20 @@ def build_scale_data(
     max_days: int,
     max_components: int,
 ) -> Tuple[np.ndarray, np.ndarray, List[str], List[str], dict]:
-    """Build observation and covariate matrices at a given scale.
+    """Tạo ma trận quan sát và ma trận biến giải thích theo từng mức.
     
     Returns
     -------
     tuple
         (y_obs, X_cov, labels, dates, scaling_info)
-        - y_obs: (K, n_obs) binary rain observations
-        - X_cov: (K, n_obs, n_features) normalized weather features
-        - labels: list of K component names
-        - dates: list of dates
-        - scaling_info: dict with scaler parameters for reproducibility
+        - y_obs: (K, n_obs) quan sát mưa nhị phân
+        - X_cov: (K, n_obs, n_features) đặc trưng thời tiết đã chuẩn hóa
+        - labels: danh sách tên thành phần (K thành phần)
+        - dates: danh sách ngày
+        - scaling_info: tham số chuẩn hóa để tái lập
     """
     if scale == "national":
-        # Aggregate to national level: average across all regions
+        # Gom về mức toàn quốc: lấy trung bình qua các vùng
         grouped = df.groupby("date", as_index=False).agg(
             {target: "mean" for target in [TARGET_COLUMN] + FEATURE_COLUMNS}
         ).sort_values("date")
@@ -152,7 +169,7 @@ def build_scale_data(
         if max_days > 0 and len(grouped) > max_days:
             grouped = grouped.head(max_days)
         
-        # Convert to matrices: (1, n_obs) for each
+        # Chuyển về ma trận: mỗi biến có dạng (1, n_obs)
         dates = grouped["date"].dt.strftime("%Y-%m-%d").tolist()
         y_obs = grouped[TARGET_COLUMN].values.astype(np.float32)[np.newaxis, :]
         X_raw = grouped[FEATURE_COLUMNS].values.astype(np.float32)[np.newaxis, :, :]
@@ -161,46 +178,52 @@ def build_scale_data(
     else:
         group_col = "region" if scale == "regional" else "province"
         
-        # Aggregate by (group, date), then pivot to wide matrix
+        # Gom theo (nhóm, ngày), rồi pivot sang ma trận rộng
         agg_dict = {col: "mean" for col in [TARGET_COLUMN] + FEATURE_COLUMNS}
         grouped = df.groupby([group_col, "date"], as_index=False).agg(agg_dict)
         
-        # Pivot to get (group, date) matrix for target
+        # Pivot để tạo ma trận (nhóm, ngày) cho biến đích
         pivot_target = grouped.pivot(index=group_col, columns="date", values=TARGET_COLUMN)
         pivot_target = pivot_target.sort_index(axis=0).sort_index(axis=1)
         
-        # Pivot for each feature
+        # Pivot cho từng biến đặc trưng
         pivots_features = {}
         for feat in FEATURE_COLUMNS:
             pivot_feat = grouped.pivot(index=group_col, columns="date", values=feat)
             pivot_feat = pivot_feat.sort_index(axis=0).sort_index(axis=1)
             pivots_features[feat] = pivot_feat
         
-        # Keep only dates and groups with complete data
-        if max_days > 0 and pivot_target.shape[1] > max_days:
-            pivot_target = pivot_target.iloc[:, :max_days]
-            pivots_features = {
-                f: pf.iloc[:, :max_days] for f, pf in pivots_features.items()
-            }
-        
-        # Align: keep only rows/cols present in all dataframes
+        # Căn chỉnh: chỉ giữ hàng/cột có mặt ở tất cả DataFrame
         all_dfs = [pivot_target] + list(pivots_features.values())
         common_rows = set(all_dfs[0].index)
         common_cols = set(all_dfs[0].columns)
         for pf in all_dfs[1:]:
             common_rows &= set(pf.index)
             common_cols &= set(pf.columns)
-        
-        pivot_target = pivot_target.loc[list(common_rows), list(common_cols)]
+
+        # Sắp xếp để đảm bảo kết quả xác định (deterministic)
+        common_rows = sorted(common_rows)
+        common_cols = sorted(common_cols)
+
+        pivot_target = pivot_target.loc[common_rows, common_cols]
         pivots_features = {
-            f: pf.loc[list(common_rows), list(common_cols)] 
+            f: pf.loc[common_rows, common_cols]
             for f, pf in pivots_features.items()
         }
-        
-        # Drop any remaining rows with NaNs
-        pivot_target = pivot_target.dropna(axis=0, how="any")
+
+        # Chỉ giữ những ngày đầy đủ cho TOÀN BỘ thành phần và TOÀN BỘ biến.
+        # Cách này giúp giữ đủ tập tỉnh/vùng (K) khi có thể.
+        complete_dates_mask = pivot_target.notna().all(axis=0)
+        for pf in pivots_features.values():
+            complete_dates_mask &= pf.notna().all(axis=0)
+
+        complete_dates = pivot_target.columns[complete_dates_mask]
+        if max_days > 0 and len(complete_dates) > max_days:
+            complete_dates = complete_dates[:max_days]
+
+        pivot_target = pivot_target.loc[:, complete_dates]
         for feat in FEATURE_COLUMNS:
-            pivots_features[feat] = pivots_features[feat].loc[pivot_target.index]
+            pivots_features[feat] = pivots_features[feat].loc[pivot_target.index, complete_dates]
         
         if max_components > 0 and pivot_target.shape[0] > max_components:
             idx = pivot_target.index[:max_components]
@@ -214,26 +237,26 @@ def build_scale_data(
         dates = [str(d.date()) for d in pivot_target.columns]
         labels = [str(x) for x in pivot_target.index]
         
-        # Stack features into (K, n_obs, n_features)
+        # Ghép đặc trưng thành tensor (K, n_obs, n_features)
         K, n_obs = y_obs.shape
         X_raw = np.zeros((K, n_obs, len(FEATURE_COLUMNS)), dtype=np.float32)
         for i, feat in enumerate(FEATURE_COLUMNS):
             X_raw[:, :, i] = pivots_features[feat].to_numpy(dtype=np.float32)
     
-    # Normalize covariates per feature (z-score across all observations)
+    # Chuẩn hóa từng đặc trưng (z-score trên toàn bộ quan sát)
     K, n_obs, n_features = X_raw.shape
     X_norm = np.zeros_like(X_raw)
     scaling_info = {}
     
     for i in range(n_features):
         feat_name = FEATURE_COLUMNS[i]
-        X_feat = X_raw[:, :, i].flatten()  # Flatten to 1D for scaling
+        X_feat = X_raw[:, :, i].flatten()  # Trải phẳng về 1D để chuẩn hóa
         
-        # Manual z-score normalization
+        # Chuẩn hóa z-score thủ công
         mean_val = np.mean(X_feat)
         std_val = np.std(X_feat)
         if std_val < 1e-8:
-            std_val = 1.0  # Avoid division by zero
+            std_val = 1.0  # Tránh chia cho 0
         
         X_feat_scaled = (X_feat - mean_val) / std_val
         X_norm[:, :, i] = X_feat_scaled.reshape(K, n_obs)
@@ -254,18 +277,18 @@ def build_bernoulli_model_and_obs(
     mu_beta: float,
     sigma_beta: float,
 ) -> Tuple[BernoulliLogitWithCovariates, np.ndarray]:
-    """Instantiate Bernoulli-logit model and format observations for permABC.
+    """Khởi tạo mô hình Bernoulli-logit và định dạng quan sát cho permABC.
     
     Parameters
     ----------
     y_obs : np.ndarray
-        Binary rain observations of shape (K, n_obs).
+        Quan sát mưa nhị phân dạng (K, n_obs).
     X_cov : np.ndarray
-        Normalized weather feature covariates of shape (K, n_obs, n_features).
+        Biến giải thích thời tiết đã chuẩn hóa dạng (K, n_obs, n_features).
     mu_alpha, sigma_alpha : float
-        Prior parameters for intercepts.
+        Siêu tham số prior cho intercept.
     mu_beta, sigma_beta : float
-        Prior parameters for feature coefficients.
+        Siêu tham số prior cho hệ số đặc trưng.
         
     Returns
     -------
@@ -285,14 +308,14 @@ def build_bernoulli_model_and_obs(
         X_cov=X_cov,
     )
     
-    # Format observation: add batch dimension (1, K, n_obs)
+    # Định dạng y_obs: thêm chiều batch thành (1, K, n_obs)
     y_obs_formatted = y_obs[np.newaxis, :, :]
     
     return model, y_obs_formatted
 
 
 def smc_result_to_lightweight(result: dict, method_name: str) -> dict:
-    """Convert SMC outputs to a small and consistent storage format."""
+    """Chuyển output SMC sang format gọn và nhất quán để lưu."""
     if result is None:
         return None
 
@@ -308,6 +331,37 @@ def smc_result_to_lightweight(result: dict, method_name: str) -> dict:
     }
 
 
+def gibbs_result_to_lightweight(
+    alpha_chain: np.ndarray,
+    beta_chain: np.ndarray,
+    eps_loc: np.ndarray,
+    eps_glob: np.ndarray,
+    times: np.ndarray,
+    n_sim_per_iter: int,
+    method_name: str,
+    n_particles_out: int,
+) -> dict:
+    """Chuyển output chain ABC-Gibbs về cùng format nhẹ như SMC."""
+    total_iters = max(len(beta_chain) - 1, 0)
+    burn_in = max(0, total_iters - n_particles_out)
+
+    alpha_samples = alpha_chain[burn_in + 1 :]
+    beta_samples = beta_chain[burn_in + 1 :]
+    thetas_final = Theta(loc=alpha_samples, glob=beta_samples)
+
+    return {
+        "Thetas_final": thetas_final,
+        "n_iterations": total_iters,
+        "total_n_sim": int(total_iters * n_sim_per_iter),
+        "time_final": float(np.sum(times)),
+        "final_epsilon": float(eps_glob[-1]) if len(eps_glob) else np.inf,
+        "Eps_values": eps_glob.tolist(),
+        "N_sim": [int(n_sim_per_iter)] * total_iters,
+        "eps_loc": eps_loc.tolist(),
+        "method": method_name,
+    }
+
+
 def run_method(
     method_name: str,
     method_info: dict,
@@ -317,7 +371,7 @@ def run_method(
     args,
     epsilon_from_perm_smc: float | None,
 ) -> dict:
-    """Run one method and return the normalized lightweight result."""
+    """Chạy một phương pháp và trả kết quả nhẹ đã chuẩn hóa."""
     mtype = method_info["type"]
 
     common_kwargs = dict(
@@ -369,6 +423,39 @@ def run_method(
         )
         return smc_result_to_lightweight(result, method_name)
 
+    if mtype == "abc_gibbs_true":
+        k_comp = model.K
+        y_obs_2d = np.asarray(y_obs).squeeze()
+        if y_obs_2d.ndim == 1:
+            y_obs_2d = y_obs_2d[None, :]
+
+        total_iters = args.gibbs_T if args.gibbs_T > 0 else args.n_particles
+        m_loc = args.gibbs_M_loc
+        m_glob = args.gibbs_M_glob
+
+        print(
+            f"  ABC-Gibbs: T={total_iters}, M_loc={m_loc}, M_glob={m_glob}, "
+            f"K={k_comp}, expected N_sim={total_iters * k_comp * (m_loc + m_glob):,}"
+        )
+        alpha_chain, beta_chain, eps_loc, eps_glob, times, n_sim_per_iter = run_gibbs_sampler_weather(
+            key=key,
+            model=model,
+            y_obs_2d=y_obs_2d,
+            T=total_iters,
+            M_loc=m_loc,
+            M_glob=m_glob,
+        )
+        return gibbs_result_to_lightweight(
+            alpha_chain=alpha_chain,
+            beta_chain=beta_chain,
+            eps_loc=eps_loc,
+            eps_glob=eps_glob,
+            times=times,
+            n_sim_per_iter=n_sim_per_iter,
+            method_name=method_name,
+            n_particles_out=args.n_particles,
+        )
+
     if mtype == "perm_smc_os":
         k_comp = model.K
         m0 = max(2 * k_comp, k_comp + 5)
@@ -388,8 +475,8 @@ def run_method(
 
     if mtype == "perm_smc_um":
         k_comp = model.K
-        # Under-matching should start as conservatively as possible on this
-        # binary rain model to avoid early weight collapse.
+        # Under-matching nên bắt đầu thật bảo thủ trên dữ liệu nhị phân
+        # để giảm nguy cơ sụp trọng số từ sớm.
         l0 = 1
         eps_start = epsilon_from_perm_smc if epsilon_from_perm_smc is not None else np.inf
         result = perm_abc_smc_um(
@@ -415,7 +502,7 @@ def save_lightweight(
     metadata: dict,
     results_dir: Path,
 ) -> None:
-    """Save one method result per (scale, seed)."""
+    """Lưu kết quả cho từng phương pháp theo (scale, seed)."""
     results_dir.mkdir(parents=True, exist_ok=True)
 
     seed = metadata.get("seed", "unknown")
@@ -428,7 +515,7 @@ def save_lightweight(
 
 
 def save_summary(all_results: dict, metadata: dict, results_dir: Path) -> None:
-    """Save cross-method summary CSV for quick benchmark comparison."""
+    """Lưu CSV tổng hợp đa phương pháp để so sánh benchmark nhanh."""
     results_dir.mkdir(parents=True, exist_ok=True)
 
     rows = []
@@ -477,6 +564,9 @@ def parse_args() -> argparse.Namespace:
     )
 
     parser.add_argument("--num_gibbs_blocks", type=int, default=3)
+    parser.add_argument("--gibbs_T", type=int, default=0)
+    parser.add_argument("--gibbs_M_loc", type=int, default=50)
+    parser.add_argument("--gibbs_M_glob", type=int, default=100)
 
     # Bernoulli-logit prior hyperparameters
     parser.add_argument("--mu_alpha", type=float, default=0.0)
@@ -515,14 +605,14 @@ def main() -> None:
     csv_path = REPO_ROOT / args.data_csv
     results_dir = REPO_ROOT / args.results_dir
 
-    # Load and validate data
+    # Nạp dữ liệu và kiểm tra hợp lệ
     weather_df = load_weather_dataframe(
         csv_path=csv_path,
         country=args.country,
     )
     print(f"Loaded {len(weather_df)} valid weather records")
 
-    # Pre-build scale data (observations + covariates) once
+    # Tiền xử lý dữ liệu theo từng mức (y_obs + X_cov) một lần
     scale_data = {}
     for scale in args.scales:
         y_obs, X_cov, labels, dates, scaling_info = build_scale_data(
@@ -580,7 +670,7 @@ def main() -> None:
         print(f"Scale: {scale.upper()} | K={k_comp} | n_obs={n_obs} | n_features={len(FEATURE_COLUMNS)}")
         print("=" * 72)
 
-        # Run permABC-SMC first to calibrate epsilon for OS/UM
+        # Chạy permABC-SMC trước để lấy epsilon khởi tạo cho OS/UM
         epsilon_from_perm_smc = None
 
         ordered_methods = list(methods_to_run)
@@ -622,7 +712,7 @@ def main() -> None:
                     epsilon_from_perm_smc = result.get("final_epsilon", None)
                     print(f"  Calibration epsilon for OS/UM: {epsilon_from_perm_smc}")
 
-                # Attach scale-specific metadata
+                # Gắn metadata theo từng mức để tái lập kết quả
                 result["meta"] = {
                     "labels": bundle["labels"],
                     "dates": bundle["dates"],
