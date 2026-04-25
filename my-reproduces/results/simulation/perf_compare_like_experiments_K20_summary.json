@@ -1,0 +1,69 @@
+{
+  "summary": {
+    "ABC-Vanilla": {
+      "rows": 10,
+      "epsilon_mean": 10.682983819346827,
+      "n_sim_mean": 186535.86111245575,
+      "time_mean": 3.0979991074935063,
+      "abs_err_sigma2_mean": 0.2389049748153765,
+      "abs_err_mu_mean_mean": 3.33780454455342
+    },
+    "permABC-Vanilla": {
+      "rows": 10,
+      "epsilon_mean": 3.907423741474554,
+      "n_sim_mean": 186535.86111245575,
+      "time_mean": 13.64414701201525,
+      "abs_err_sigma2_mean": 0.21085042810019247,
+      "abs_err_mu_mean_mean": 1.7336683841542804
+    },
+    "ABC-SMC": {
+      "rows": 1060,
+      "epsilon_mean": 9.466723189355552,
+      "n_sim_mean": 681235.1999145144,
+      "time_mean": 21.604095503305334,
+      "abs_err_sigma2_mean": 0.18113855988692373,
+      "abs_err_mu_mean_mean": 3.238059495322553
+    },
+    "ABC-PMC": {
+      "rows": 23,
+      "epsilon_mean": 9.732917117600875,
+      "n_sim_mean": 1753140.7181821566,
+      "time_mean": 810.7846578821066,
+      "abs_err_sigma2_mean": 0.19036831047118377,
+      "abs_err_mu_mean_mean": 3.11872211091801
+    },
+    "permABC-SMC": {
+      "rows": 1488,
+      "epsilon_mean": 1.1184771509353009,
+      "n_sim_mean": 1090957.8696840624,
+      "time_mean": 57.07744666345297,
+      "abs_err_sigma2_mean": 0.12893268646871942,
+      "abs_err_mu_mean_mean": 0.2559507064001013
+    },
+    "permABC-SMC-OS": {
+      "rows": 8,
+      "epsilon_mean": 2.1139148082520434,
+      "n_sim_mean": 133029.3190978705,
+      "time_mean": 12.696006721094061,
+      "abs_err_sigma2_mean": 0.15731078997466152,
+      "abs_err_mu_mean_mean": 0.8544341700953537
+    },
+    "permABC-SMC-UM": {
+      "rows": 7,
+      "epsilon_mean": 4.009334610121566,
+      "n_sim_mean": 13161.18990154145,
+      "time_mean": 1.6714094601351115,
+      "abs_err_sigma2_mean": 0.19829513925783004,
+      "abs_err_mu_mean_mean": 2.120652620373766
+    }
+  },
+  "method_order": [
+    "ABC-Vanilla",
+    "permABC-Vanilla",
+    "ABC-SMC",
+    "ABC-PMC",
+    "permABC-SMC",
+    "permABC-SMC-OS",
+    "permABC-SMC-UM"
+  ]
+}
